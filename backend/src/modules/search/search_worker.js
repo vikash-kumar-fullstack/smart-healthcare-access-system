@@ -1,6 +1,7 @@
 import SearchOutbox from "./search_outbox.model.js";
 import SearchAnalyticsDaily from "./search_analytics_daily.model.js";
 import SearchMonitoringDaily from "./search_monitoring_daily.model.js";
+import mongoose from "mongoose";
 
 const WORKER_ID = `search_worker_${Math.random().toString(36).substring(2, 11)}`;
 let isSearchDispatcherRunning = false;
@@ -71,6 +72,9 @@ export const searchOutboxDispatcher = async () => {
           const emptySearch = payload.resultsCount === 0 ? 1 : 0;
           const hit = payload.cacheHit ? 1 : 0;
           const miss = payload.cacheHit ? 0 : 1;
+          const isDegraded = payload.mode === "degraded" ? 1 : 0;
+          const isSuccess = payload.mode !== "fallback" ? 1 : 0;
+          const isFailure = payload.mode === "fallback" ? 1 : 0;
 
           await SearchMonitoringDaily.updateOne(
             { date, scope: "global" },
@@ -79,7 +83,10 @@ export const searchOutboxDispatcher = async () => {
               $inc: {
                 cacheHit: hit,
                 cacheMiss: miss,
-                emptySearch
+                emptySearch,
+                degradedCount: isDegraded,
+                successCount: isSuccess,
+                failureCount: isFailure
               }
             },
             { upsert: true }
@@ -163,7 +170,31 @@ export const nightlySearchRollupWorker = async () => {
       day.latencyP50 = sorted[p50Idx] || 0;
       day.latencyP95 = sorted[p95Idx] || 0;
       day.latencyP99 = sorted[p99Idx] || 0;
+      
+      // Growth control: clear buckets (Rule 5)
+      day.latencyBuckets = [];
       await day.save();
+
+      // SLO calculation and update to global system monitoring (Rule 10)
+      const total = (day.successCount || 0) + (day.failureCount || 0);
+      const successRate = total > 0 ? ((day.successCount || 0) / total) * 100 : 100;
+      const degradedRate = total > 0 ? ((day.degradedCount || 0) / total) * 100 : 0;
+      const cacheTotal = (day.cacheHit || 0) + (day.cacheMiss || 0);
+      const cacheHitRate = cacheTotal > 0 ? ((day.cacheHit || 0) / cacheTotal) * 100 : 0;
+
+      const SystemMonitoring = mongoose.model("SystemMonitoring");
+      await SystemMonitoring.findOneAndUpdate(
+        { name: "global" },
+        {
+          $set: {
+            search_success_rate: successRate,
+            search_p95: day.latencyP95,
+            degraded_mode_rate: degradedRate,
+            cache_hit_rate: cacheHitRate
+          }
+        },
+        { upsert: true }
+      );
     }
   } catch (err) {
     console.error("Error in nightly search rollup worker:", err);

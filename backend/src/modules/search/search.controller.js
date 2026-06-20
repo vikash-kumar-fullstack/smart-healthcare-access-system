@@ -89,8 +89,33 @@ export const search = asyncHandler(async (req, res) => {
   return successResponse(res, searchResult, "Search completed successfully");
 });
 
+// Memory-based Suggestions Rate Limiter (10 requests per 10 seconds)
+const suggestionRateLimitMap = new Map();
+const checkSuggestionRateLimit = (ip) => {
+  const now = Date.now();
+  const windowMs = 10000; // 10 seconds
+  const maxRequests = 10;
+
+  const data = suggestionRateLimitMap.get(ip);
+  if (!data || now > data.resetAt) {
+    suggestionRateLimitMap.set(ip, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+
+  data.count += 1;
+  if (data.count > maxRequests) {
+    return false;
+  }
+  return true;
+};
+
 // ── GET /api/v1/search/suggestions (Bypasses ranking engine under 100ms) ───
 export const getSuggestions = asyncHandler(async (req, res) => {
+  const clientIp = req.ip || req.headers["x-forwarded-for"] || "127.0.0.1";
+  if (!checkSuggestionRateLimit(clientIp)) {
+    return res.status(429).json({ success: false, message: "Too many suggestion requests. Please try again later." });
+  }
+
   const { q } = req.query;
   if (!q || q.trim() === "") {
     return successResponse(res, { suggestions: [] });

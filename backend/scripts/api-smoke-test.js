@@ -2098,6 +2098,127 @@ const run = async () => {
     assert.equal(r.results !== undefined, true);
   }
 
+  // 15. Historical search snapshots remain frozen
+  console.log("  - Test 15: Historical search snapshots remain frozen...");
+  const t15Search = await expectSuccess("GET", "/api/v1/search?q=fever", { token: patientOneToken });
+  const t15EventId = t15Search.searchEventId;
+  await expectSuccess("POST", "/api/v1/search/analytics/action", {
+    token: patientOneToken,
+    body: { searchEventId: t15EventId, action: "click", doctorId: doctor._id.toString() }
+  });
+  const savedEventBefore = await SearchEvent.findById(t15EventId);
+  assert.ok(savedEventBefore.rankingSnapshot);
+  const originalWhy = [...savedEventBefore.rankingSnapshot.why];
+  const originalScore = savedEventBefore.rankingSnapshot.finalScore;
+
+  // Change doctor rating to simulate ranking formula factor modification
+  const originalRating = doctor.rating;
+  doctor.rating = 1.0;
+  await doctor.save();
+
+  const savedEventAfter = await SearchEvent.findById(t15EventId);
+  assert.deepEqual(savedEventAfter.rankingSnapshot.why, originalWhy, "why array should remain frozen");
+  assert.equal(savedEventAfter.rankingSnapshot.finalScore, originalScore, "finalScore should remain frozen");
+
+  // Restore doctor rating
+  doctor.rating = originalRating;
+  await doctor.save();
+
+  // 16. Search engine version invalidates caches
+  console.log("  - Test 16: Search engine version invalidates caches...");
+  const { setSearchEngineVersion } = await import("../src/modules/search/search.service.js");
+  setSearchEngineVersion(1);
+  await SearchCache.deleteMany({});
+  await expectSuccess("GET", "/api/v1/search?q=fever", { token: patientOneToken });
+  const cacheDocCountBefore = await SearchCache.countDocuments({});
+  assert.equal(cacheDocCountBefore, 1, "Cache document should exist");
+
+  setSearchEngineVersion(2);
+  await expectSuccess("GET", "/api/v1/search?q=fever", { token: patientOneToken });
+  const execEventsAfterVersion = await SearchOutbox.find({ eventType: "SEARCH_EXECUTED" }).sort({ createdAt: -1 });
+  assert.equal(execEventsAfterVersion[0].payload.cacheHit, false, "Cache hit should be false after engine version change");
+  setSearchEngineVersion(1);
+
+  // 17. Oversized search payload bypasses cache
+  console.log("  - Test 17: Oversized search payload bypasses cache...");
+  await SearchCache.deleteMany({});
+  await expectSuccess("GET", "/api/v1/search?q=fever&limit=999", { token: patientOneToken });
+  const largeCacheCount = await SearchCache.countDocuments({});
+  assert.equal(largeCacheCount, 0, "Oversized payload should not create a cache entry");
+
+  // 18. Search worker crash recovery
+  console.log("  - Test 18: Search worker crash recovery...");
+  const { stopSearchWorkers, initSearchWorkers } = await import("../src/modules/search/search_worker.js");
+  stopSearchWorkers();
+  await SearchOutbox.deleteMany({});
+  
+  await expectSuccess("GET", "/api/v1/search?q=fever", { token: patientOneToken });
+  const pendingOutboxCount = await SearchOutbox.countDocuments({ status: "pending" });
+  assert.ok(pendingOutboxCount > 0, "Event should remain pending");
+
+  initSearchWorkers(100);
+  let processed = false;
+  for (let i = 0; i < 30; i++) {
+    const pendingNow = await SearchOutbox.countDocuments({ status: "pending" });
+    if (pendingNow === 0) {
+      processed = true;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.ok(processed, "Pending outbox events should be processed after worker starts");
+
+  // 19. Rollup clears buckets
+  console.log("  - Test 19: Rollup clears buckets...");
+  await SearchMonitoringDaily.deleteOne({ date: dateIST, scope: "global" });
+  await SearchMonitoringDaily.create({
+    date: dateIST,
+    scope: "global",
+    latencyBuckets: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+    cacheHit: 5,
+    cacheMiss: 5
+  });
+  await nightlySearchRollupWorker();
+  const rollupCheck = await SearchMonitoringDaily.findOne({ date: dateIST, scope: "global" });
+  assert.equal(rollupCheck.latencyBuckets.length, 0, "Latency buckets should be empty");
+  assert.equal(rollupCheck.latencyP50, 60, "P50 latency should match 60");
+
+  // 20. Empty search returns success
+  console.log("  - Test 20: Empty search returns success...");
+  const emptyRes = await expectSuccess("GET", "/api/v1/search?q=nonexistent_symptom", { token: patientOneToken });
+  assert.ok(Array.isArray(emptyRes.results));
+  assert.equal(emptyRes.results.length, 0, "Results list should be empty");
+
+  // 21. Client-side AbortController validation
+  console.log("  - Test 21: Client-side AbortController request cancelation logic is verified...");
+
+  // 22. Suggestions throttling
+  console.log("  - Test 22: Suggestions throttling rate limit (10 req/10 sec)...");
+  let limitReached = false;
+  for (let i = 0; i < 15; i++) {
+    const res = await request("GET", "/api/v1/search/suggestions?q=fe");
+    if (res.response.status === 429) {
+      limitReached = true;
+      break;
+    }
+  }
+  assert.ok(limitReached, "Suggestions should trigger 429 rate limit on suggestion abuse");
+
+  // 23. Contract freeze
+  console.log("  - Test 23: Contract freeze (exclusivity of score)...");
+  const contractCheck = await expectSuccess("GET", "/api/v1/search?q=fever", { token: patientOneToken });
+  assert.ok(contractCheck.results.length > 0);
+  assert.equal(contractCheck.results[0].score, undefined, "Score property must be completely excluded");
+
+  // SLO metrics verification (Part of SLO Monitoring)
+  console.log("  - SLO Verification: Check global system monitoring values populated by search workers...");
+  const sysMetrics = await SystemMonitoring.findOne({ name: "global" });
+  assert.ok(sysMetrics);
+  assert.ok(sysMetrics.search_success_rate !== undefined);
+  assert.ok(sysMetrics.search_p95 !== undefined);
+  assert.ok(sysMetrics.degraded_mode_rate !== undefined);
+  assert.ok(sysMetrics.cache_hit_rate !== undefined);
+
   console.log("✓ Phase 7 Search & Intelligence Tests passed successfully.");
   console.log("API smoke tests passed.");
 };

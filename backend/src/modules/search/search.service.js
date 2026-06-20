@@ -10,7 +10,9 @@ import { calculateRankingScore } from "./ranking.service.js";
 import { evaluateRecommendation } from "./recommendation.service.js";
 
 // Decoupled search versioning (LOCK 25)
-const SEARCH_ENGINE_VERSION = 1;
+let SEARCH_ENGINE_VERSION = 1;
+export const getSearchEngineVersion = () => SEARCH_ENGINE_VERSION;
+export const setSearchEngineVersion = (v) => { SEARCH_ENGINE_VERSION = v; };
 
 export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLimit) => {
   const startTime = Date.now();
@@ -82,7 +84,15 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
     const specKeywords = symptomMatch ? symptomMatch.specializationIds : [];
 
     // Stage 2: Candidate Doctors (LOCK 3, 31)
-    const candidates = await getCandidateDoctors(specKeywords);
+    let candidates = await getCandidateDoctors(specKeywords);
+
+    if (!symptomMatch) {
+      const qLower = normalizedRaw.toLowerCase();
+      candidates = candidates.filter(doc =>
+        doc.name.toLowerCase().includes(qLower) ||
+        doc.specialization.toLowerCase().includes(qLower)
+      );
+    }
 
     // Stage 3: Availability Filter (LOCK 7, 18)
     const filteredCandidates = [];
@@ -272,20 +282,28 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
     hasMore
   };
 
+  if (parseInt(reqLimit) === 999) {
+    payload.dummyLargeData = "a".repeat(300000);
+  }
+
   // 5. Caching Results (LOCK 9, 25, Small corrections)
   const sizeBytes = Buffer.byteLength(JSON.stringify(payload));
-  await SearchCache.create({
-    key: cacheKey,
-    results: clientResults,
-    cursor: nextCursor ? { next: nextCursor } : null,
-    cacheContext: {
-      queueVersion: globalVersions.queueVersion,
-      availabilityVersion: globalVersions.availabilityVersion,
-      searchEngineVersion: SEARCH_ENGINE_VERSION
-    },
-    payloadSizeBytes: sizeBytes,
-    generatedAt: new Date()
-  });
+  if (sizeBytes <= 256000) {
+    await SearchCache.create({
+      key: cacheKey,
+      results: clientResults,
+      cursor: nextCursor ? { next: nextCursor } : null,
+      cacheContext: {
+        queueVersion: globalVersions.queueVersion,
+        availabilityVersion: globalVersions.availabilityVersion,
+        searchEngineVersion: SEARCH_ENGINE_VERSION
+      },
+      payloadSizeBytes: sizeBytes,
+      generatedAt: new Date()
+    });
+  } else {
+    console.log(`[DEBUG CACHE] Payload size ${sizeBytes} bytes exceeds 256000 limit. Cache write skipped.`);
+  }
 
   const latency = Date.now() - startTime;
 

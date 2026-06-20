@@ -40,6 +40,18 @@ const searchMonitoringDailySchema = new mongoose.Schema({
   spellCorrectionRate: {
     type: Number,
     default: 0
+  },
+  degradedCount: {
+    type: Number,
+    default: 0
+  },
+  successCount: {
+    type: Number,
+    default: 0
+  },
+  failureCount: {
+    type: Number,
+    default: 0
   }
 }, { timestamps: true });
 

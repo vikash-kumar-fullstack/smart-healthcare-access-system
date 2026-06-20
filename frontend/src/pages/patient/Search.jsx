@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Search as SearchIcon, X, MapPin, Compass, AlertCircle, Sparkles, Clock, Star, Shield, ArrowRight } from "lucide-react";
 import toast from "react-hot-toast";
+import axios from "axios";
 import api from "../../services/api";
 import { DoctorCardSkeleton } from "../../components/Skeletons";
 
@@ -25,6 +26,8 @@ export default function PatientSearch() {
 
   const searchInputRef = useRef(null);
   const suggestionRef = useRef(null);
+  const searchAbortControllerRef = useRef(null);
+  const suggestionsAbortControllerRef = useRef(null);
 
   // Popular presets for empty state / quick discovery
   const presetSymptoms = [
@@ -121,12 +124,22 @@ export default function PatientSearch() {
     }
 
     const delayDebounceFn = setTimeout(async () => {
+      if (suggestionsAbortControllerRef.current) {
+        suggestionsAbortControllerRef.current.abort();
+      }
+
+      const controller = new AbortController();
+      suggestionsAbortControllerRef.current = controller;
+
       try {
-        const res = await api.get(`/search/suggestions?q=${encodeURIComponent(query)}`);
+        const res = await api.get(`/search/suggestions?q=${encodeURIComponent(query)}`, { signal: controller.signal });
         if (res.data?.success) {
           setSuggestions(res.data.data.suggestions || []);
         }
       } catch (err) {
+        if (axios.isCancel(err) || err.name === "CanceledError") {
+          return;
+        }
         // Fail silently to keep user typing uninterrupted
         console.error("Suggestions fetch failed", err);
       }
@@ -156,6 +169,13 @@ export default function PatientSearch() {
     const trimmed = searchQuery.trim();
     if (!trimmed) return;
 
+    if (searchAbortControllerRef.current) {
+      searchAbortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    searchAbortControllerRef.current = controller;
+
     if (isLoadMore) {
       setLoadingMore(true);
     } else {
@@ -172,7 +192,7 @@ export default function PatientSearch() {
         url += `&cursor=${encodeURIComponent(nextCursor)}`;
       }
 
-      const res = await api.get(url);
+      const res = await api.get(url, { signal: controller.signal });
       if (res.data?.success) {
         const searchResult = res.data.data;
         const newResults = isLoadMore
@@ -205,11 +225,16 @@ export default function PatientSearch() {
         }
       }
     } catch (err) {
+      if (axios.isCancel(err) || err.name === "CanceledError") {
+        return;
+      }
       console.error(err);
       toast.error(err.response?.data?.message || "Search failed. Please try again.");
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      if (searchAbortControllerRef.current === controller) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
     }
   };
 
@@ -475,9 +500,9 @@ export default function PatientSearch() {
                 <div className="w-16 h-16 bg-slate-50 text-slate-400 rounded-full flex items-center justify-center mx-auto text-2xl mb-4">
                   🔍
                 </div>
-                <h3 className="text-lg font-bold text-slate-800">No matching doctors</h3>
+                <h3 className="text-lg font-bold text-slate-800">No doctors found</h3>
                 <p className="text-slate-500 text-sm mt-2">
-                  We couldn't map your query. Try searching general clinic symptoms (e.g. pain, fever, cough) or clear the input to view preset filters.
+                  Try another symptom. We couldn't map your query to any active clinician.
                 </p>
                 <button
                   onClick={clearSearch}

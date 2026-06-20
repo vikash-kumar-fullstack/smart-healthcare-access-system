@@ -26,6 +26,22 @@ const systemMonitoringSchema = new mongoose.Schema({
   notification_ack_race_count: {
     type: Number,
     default: 0
+  },
+  search_success_rate: {
+    type: Number,
+    default: 100
+  },
+  search_p95: {
+    type: Number,
+    default: 0
+  },
+  degraded_mode_rate: {
+    type: Number,
+    default: 0
+  },
+  cache_hit_rate: {
+    type: Number,
+    default: 0
   }
 }, { timestamps: true });
 
