@@ -5,6 +5,7 @@ import connectDB from "./config/db.js";
 import { initCronJobs } from "./utils/cron.js";
 import { initSocket } from "./utils/socket.js";
 import { initNotificationWorkers } from "./modules/notification/notification_worker.js";
+import { initSearchWorkers } from "./modules/search/search_worker.js";
 
 dotenv.config();
 
@@ -20,6 +21,8 @@ connectDB().then(() => {
   initCronJobs();
   // Initialize background notification processing workers
   initNotificationWorkers(500);
+  // Initialize background search analytics processing workers
+  initSearchWorkers(500);
 });
 
 server.listen(PORT, () => {

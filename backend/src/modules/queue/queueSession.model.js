@@ -61,6 +61,18 @@ const queueSessionSchema = new mongoose.Schema({
 
 queueSessionSchema.index({ doctorId: 1, date: 1 }, { unique: true });
 queueSessionSchema.index({ doctorId: 1, sessionStatus: 1, date: -1 });
+
+queueSessionSchema.post("save", async function (doc) {
+  try {
+    const { updateDoctorAvailabilitySnapshot } = await import("../search/availability.service.js");
+    const { incrementQueueVersion } = await import("../search/utils.js");
+    await incrementQueueVersion();
+    await updateDoctorAvailabilitySnapshot(doc.doctorId);
+  } catch (err) {
+    console.error("Failed to update availability snapshot on queue session save:", err);
+  }
+});
+
 const QueueSession = mongoose.model("QueueSession", queueSessionSchema);
 
 export default QueueSession;

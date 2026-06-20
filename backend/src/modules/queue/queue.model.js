@@ -109,5 +109,16 @@ queueSchema.pre("save", async function () {
   }
 });
 
+queueSchema.post("save", async function (doc) {
+  try {
+    const { updateDoctorAvailabilitySnapshot } = await import("../search/availability.service.js");
+    const { incrementQueueVersion } = await import("../search/utils.js");
+    await incrementQueueVersion();
+    await updateDoctorAvailabilitySnapshot(doc.doctorId);
+  } catch (err) {
+    console.error("Failed to update availability snapshot on queue save:", err);
+  }
+});
+
 const Queue = mongoose.model("Queue", queueSchema);
 export default Queue;

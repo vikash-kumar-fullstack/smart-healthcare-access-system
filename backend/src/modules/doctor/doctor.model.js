@@ -85,6 +85,16 @@ const doctorSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-const Doctor = mongoose.model("Doctor", doctorSchema);
+doctorSchema.post("save", async function (doc) {
+  try {
+    const { updateDoctorAvailabilitySnapshot } = await import("../search/availability.service.js");
+    const { incrementAvailabilityVersion } = await import("../search/utils.js");
+    await incrementAvailabilityVersion();
+    await updateDoctorAvailabilitySnapshot(doc._id);
+  } catch (err) {
+    console.error("Failed to update availability snapshot on doctor save:", err);
+  }
+});
 
+const Doctor = mongoose.model("Doctor", doctorSchema);
 export default Doctor;

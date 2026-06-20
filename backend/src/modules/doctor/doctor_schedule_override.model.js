@@ -28,5 +28,16 @@ const doctorScheduleOverrideSchema = new mongoose.Schema({
 
 doctorScheduleOverrideSchema.index({ doctorId: 1, date: 1 }, { unique: true });
 
+doctorScheduleOverrideSchema.post("save", async function (doc) {
+  try {
+    const { updateDoctorAvailabilitySnapshot } = await import("../search/availability.service.js");
+    const { incrementAvailabilityVersion } = await import("../search/utils.js");
+    await incrementAvailabilityVersion();
+    await updateDoctorAvailabilitySnapshot(doc.doctorId);
+  } catch (err) {
+    console.error("Failed to update availability snapshot on schedule override save:", err);
+  }
+});
+
 const DoctorScheduleOverride = mongoose.model("DoctorScheduleOverride", doctorScheduleOverrideSchema);
 export default DoctorScheduleOverride;

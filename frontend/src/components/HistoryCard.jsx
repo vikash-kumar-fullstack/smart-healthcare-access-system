@@ -1,4 +1,4 @@
-export default function HistoryCard({ item }) {
+export default function HistoryCard({ item, onViewSummary }) {
 
   const getStatusColor = () => {
 
@@ -83,6 +83,17 @@ export default function HistoryCard({ item }) {
         )}
 
       </div>
+
+      {item.visitId && item.status === "completed" && (
+        <div className="mt-4 pt-3 border-t flex justify-end">
+          <button
+            onClick={() => onViewSummary(item.visitId)}
+            className="text-xs bg-blue-600 hover:bg-blue-700 text-white font-semibold px-3.5 py-1.5 rounded-lg transition active:scale-95 flex items-center gap-1 shadow-sm"
+          >
+            <span>📋</span> View Medical Summary
+          </button>
+        </div>
+      )}
 
     </div>
   );

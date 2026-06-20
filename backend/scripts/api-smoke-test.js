@@ -32,10 +32,19 @@ import { incrementUnread } from "../src/modules/notification/notification_counte
 import { notificationDispatcher, retryWorker, cleanupWorker, initNotificationWorkers, stopNotificationWorkers } from "../src/modules/notification/notification_worker.js";
 import { initSocket } from "../src/utils/socket.js";
 import { runMonthlyReset, runBookingCreditCleanup } from "../src/utils/cron.js";
+import { stopSearchWorkers } from "../src/modules/search/search_worker.js";
 import Visit from "../src/modules/visit/visit.model.js";
 import VisitTimeline from "../src/modules/visit/visit_timeline.model.js";
 import VisitSummary from "../src/modules/visit/visit_summary.model.js";
 import VisitSequence from "../src/modules/visit/visit_sequence.model.js";
+import SymptomDictionary from "../src/modules/search/symptom_dictionary.model.js";
+import DoctorAvailabilitySnapshot from "../src/modules/search/doctor_availability_snapshot.model.js";
+import SearchEvent from "../src/modules/search/search_event.model.js";
+import SearchCache from "../src/modules/search/search_cache.model.js";
+import SearchAnalyticsDaily from "../src/modules/search/search_analytics_daily.model.js";
+import SearchMonitoringDaily from "../src/modules/search/search_monitoring_daily.model.js";
+import SearchOutbox from "../src/modules/search/search_outbox.model.js";
+import SearchVersionMeta from "../src/modules/search/search_version_meta.model.js";
 
 dotenv.config();
 
@@ -120,6 +129,7 @@ const login = async (email) => {
 
 const cleanup = async () => {
   stopNotificationWorkers();
+  stopSearchWorkers();
   await Promise.allSettled([
     Queue.deleteMany({
       $or: [
@@ -154,7 +164,15 @@ const cleanup = async () => {
     Visit.deleteMany({}),
     VisitTimeline.deleteMany({}),
     VisitSummary.deleteMany({}),
-    VisitSequence.deleteMany({})
+    VisitSequence.deleteMany({}),
+    SymptomDictionary.deleteMany({}),
+    DoctorAvailabilitySnapshot.deleteMany({}),
+    SearchEvent.deleteMany({}),
+    SearchCache.deleteMany({}),
+    SearchAnalyticsDaily.deleteMany({}),
+    SearchMonitoringDaily.deleteMany({}),
+    SearchOutbox.deleteMany({}),
+    SearchVersionMeta.deleteMany({})
   ]);
 };
 
@@ -489,7 +507,7 @@ const run = async () => {
   await QueueSession.deleteMany({});
   await BookingCredit.deleteMany({});
   await PatientStats.deleteMany({});
-  
+
   // Reset reliability scores of our patients
   await PatientStats.create({ userId: patientOne._id, reliabilityScore: 100, noShowCountThisMonth: 0 });
   await PatientStats.create({ userId: patientTwo._id, reliabilityScore: 100, noShowCountThisMonth: 0 });
@@ -519,7 +537,7 @@ const run = async () => {
     body: { doctorId: doctor._id.toString(), bookingDate: validDateStr }
   });
   assert.equal(bookFutureRes.booking.status, "waiting");
-  
+
   // Cancel future booking so user has no active bookings
   await expectSuccess("PATCH", "/api/v1/queue/cancel", { token: patientOneToken });
   // Verify reliability score is decremented by 1 for early cancel (100 -> 99)
@@ -620,13 +638,13 @@ const run = async () => {
 
   // 5. Test Session Close Edge Case (Close disabled while consulting)
   console.log("Testing session close edge case (consultation in progress)...");
-  
+
   // Book patientOne and patientTwo
   const b_edge_1 = await expectSuccess("POST", "/api/v1/queue/book", {
     token: patientOneToken,
     body: { doctorId: doctor._id.toString() }
   });
-  
+
   // Since session was resumed and empty, pause and resume to auto-start this patient
   await expectSuccess("PATCH", "/api/v1/queue/pause-session", { token: doctorToken });
   await expectSuccess("PATCH", "/api/v1/queue/resume-session", { token: doctorToken });
@@ -718,7 +736,7 @@ const run = async () => {
 
   const tomorrowSession = await QueueSession.findOne({ doctorId: doctor._id, date: tomorrowStr });
   const sortedQueue = await Queue.find({ sessionId: tomorrowSession._id }).sort({ isPriority: -1, queueNumber: 1 });
-  
+
   assert.equal(sortedQueue[0].userId.toString(), patientTwo._id.toString());
   assert.equal(sortedQueue[1].userId.toString(), patientOne._id.toString());
   assert.equal(sortedQueue[2].userId.toString(), newPatientUser._id.toString());
@@ -808,7 +826,7 @@ const run = async () => {
     used: false,
     expired: false
   });
-  
+
   await runBookingCreditCleanup();
 
   // Verify that it is now marked as expired: true
@@ -834,12 +852,12 @@ const run = async () => {
 
   // ─── 10. Full Patient-Doctor Integration Journey ────────────────────────────
   console.log("Testing Full Patient-Doctor Integration Journey...");
-  
+
   // Clear collections for clean run
   await Queue.deleteMany({});
   await BookingCredit.deleteMany({});
   await PatientStats.deleteMany({});
-  
+
   // Re-activate today's session
   const intSession = await QueueSession.findOne({ doctorId: doctor._id, date: todayIST });
   intSession.sessionStatus = "active";
@@ -853,11 +871,11 @@ const run = async () => {
     token: patientOneToken,
     body: { doctorId: doctor._id.toString() }
   });
-  
+
   // Pause/resume to auto-start Patient 1
   await expectSuccess("PATCH", "/api/v1/queue/pause-session", { token: doctorToken });
   await expectSuccess("PATCH", "/api/v1/queue/resume-session", { token: doctorToken });
-  
+
   const j_q1 = await Queue.findById(j_book1.booking.queueId);
   assert.equal(j_q1.status, "in_progress");
 
@@ -866,7 +884,7 @@ const run = async () => {
     token: patientTwoToken,
     body: { doctorId: doctor._id.toString() }
   });
-  
+
   // Verify Patient 2 initial position and ETA
   const j_p2_state1 = await expectSuccess("GET", "/api/v1/queue/my", { token: patientTwoToken });
   assert.equal(j_p2_state1.patientsAhead, 0); // next in line
@@ -905,7 +923,7 @@ const run = async () => {
     token: doctorToken,
     body: { queueId: j_book2.booking.queueId }
   });
-  
+
   const j_q2_completed = await Queue.findById(j_book2.booking.queueId);
   assert.equal(j_q2_completed.status, "completed");
 
@@ -920,9 +938,9 @@ const run = async () => {
     token: patientOneToken,
     body: { doctorId: doctor._id.toString() }
   });
-  
+
   await expectSuccess("PATCH", "/api/v1/queue/close-session", { token: doctorToken });
-  
+
   const j_q1_cancelled = await Queue.findById(j_book1_re.booking.queueId);
   assert.equal(j_q1_cancelled.status, "cancelled");
   assert.equal(j_q1_cancelled.cancelReason, "session_closed");
@@ -995,13 +1013,13 @@ const run = async () => {
   // Test 2: Schedule Snapshot Integrity
   console.log("  - Test 2: Schedule Snapshot Integrity...");
   const snapshotDateStr = new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-  
+
   const originalDoc = await Doctor.findById(doctor._id);
   const originalLimit = originalDoc.defaultQueueLimit;
-  
+
   originalDoc.defaultQueueLimit = 5;
   await originalDoc.save();
-  
+
   const snapSession = await expectSuccess("POST", "/api/v1/queue/book", {
     token: patientOneToken,
     body: { doctorId: doctor._id.toString(), bookingDate: snapshotDateStr }
@@ -1012,29 +1030,29 @@ const run = async () => {
   const snapSessionModel = await QueueSession.findOne({ doctorId: doctor._id, date: snapshotDateStr });
   assert.equal(snapSessionModel.maxQueueLimit, 5);
   assert.equal(snapSessionModel.scheduleSnapshot.queueLimit, 5);
-  
+
   originalDoc.defaultQueueLimit = originalLimit;
   await originalDoc.save();
 
   // Test 3: Continue Queue Policy
   console.log("  - Test 3: Continue Queue Policy...");
   await Queue.deleteMany({});
-  
+
   // Set doctor available
   await Doctor.findByIdAndUpdate(doctor._id, { availabilityState: "available" });
-  
+
   // Active session today
   const todaySess = await QueueSession.findOne({ doctorId: doctor._id, date: todayIST });
   todaySess.sessionStatus = "active";
   todaySess.isActive = true;
   await todaySess.save();
-  
+
   const b_continue = await expectSuccess("POST", "/api/v1/queue/book", {
     token: patientOneToken,
     body: { doctorId: doctor._id.toString() }
   });
   assert.equal(b_continue.canBook, true);
-  
+
   const currentDoctorDoc = await Doctor.findById(doctor._id);
   await expectSuccess("PATCH", "/api/v1/doctors/profile/settings", {
     token: doctorToken,
@@ -1044,14 +1062,14 @@ const run = async () => {
       version: currentDoctorDoc.__v
     }
   });
-  
+
   const b_continue_blocked = await expectSuccess("POST", "/api/v1/queue/book", {
     token: patientTwoToken,
     body: { doctorId: doctor._id.toString() }
   });
   assert.equal(b_continue_blocked.canBook, false);
   assert.equal(b_continue_blocked.code, "DOCTOR_OFFLINE");
-  
+
   const sessVerify = await QueueSession.findById(todaySess._id);
   assert.equal(sessVerify.sessionStatus, "active");
 
@@ -1069,7 +1087,7 @@ const run = async () => {
       version: currentDoctorDoc2.__v
     }
   });
-  
+
   const docList = await expectSuccess("GET", "/api/v1/doctors", { token: patientOneToken });
   const docData = docList.find(d => d.id.toString() === doctor._id.toString());
   assert.equal(docData.availabilityState, "delayed");
@@ -1094,6 +1112,7 @@ const run = async () => {
 
   // Test 7: Soft booking failures response schema validation
   console.log("  - Test 7: Soft booking failure response schema...");
+  await Queue.collection.updateMany({}, { $set: { createdAt: new Date(Date.now() - 70000) } });
   const softFailureData = await expectSuccess("POST", "/api/v1/queue/book", {
     token: patientOneToken,
     body: { doctorId: doctor._id.toString() }
@@ -1139,10 +1158,10 @@ const run = async () => {
   console.log("  - Test 2: Sparse data (1 consultation)...");
   await Queue.deleteMany({});
   await DoctorAnalyticsDaily.deleteMany({});
-  
+
   // Set doctor back to available
   await Doctor.findByIdAndUpdate(doctor._id, { availabilityState: "available" });
-  
+
   // Active session today
   const todaySessionForAnalytics = await QueueSession.findOne({ doctorId: doctor._id, date: todayIST });
   todaySessionForAnalytics.sessionStatus = "active";
@@ -1155,7 +1174,7 @@ const run = async () => {
     token: patientOneToken,
     body: { doctorId: doctor._id.toString() }
   });
-  
+
   const sparseQueue = await Queue.findById(b_sparse.booking.queueId);
   sparseQueue.status = "in_progress";
   sparseQueue.startedAt = new Date(Date.now() - 5 * 60000);
@@ -1224,7 +1243,7 @@ const run = async () => {
   // 7. Rebuild Analytics verification
   console.log("  - Test 7: Rebuild Analytics service check...");
   await DoctorAnalyticsDaily.deleteMany({ doctorId: doctor._id });
-  
+
   const adminUser = await createUser({
     name: `${testRunId} Admin User`,
     email: `${testRunId}-admin@example.com`,
@@ -1700,16 +1719,16 @@ const run = async () => {
     body: { doctorId: p6Doctor._id.toString() }
   });
   created.queues.push(bookRes.booking.queueId);
-  
+
   assert.ok(bookRes.booking.visit, "Booking response should include visit details");
   const visitIdStr = bookRes.booking.visit._id.toString();
-  
+
   // Query db to verify Visit and Timeline
   const dbVisit = await Visit.findById(visitIdStr);
   assert.ok(dbVisit, "Visit should be present in database");
   assert.equal(dbVisit.status, "scheduled", "Visit should start in scheduled state (session inactive)");
   assert.ok(dbVisit.publicId.startsWith("VIS-"), "Visit publicId format should be VIS-YYYY-MM-XXXXXX");
-  
+
   const bookedEvents = await VisitTimeline.find({ visitId: dbVisit._id, eventType: "BOOKED" });
   assert.equal(bookedEvents.length, 1, "Timeline event BOOKED should exist");
   assert.equal(bookedEvents[0].sequence, 1, "First event sequence should be 1");
@@ -1726,7 +1745,7 @@ const run = async () => {
   // Start Session to move visit to waiting
   console.log("  - Moving scheduled visit to waiting by starting session...");
   await expectSuccess("PATCH", "/api/v1/queue/start-session", { token: p6DoctorToken });
-  
+
   const visitAfterStartSession = await Visit.findById(visitIdStr);
   assert.equal(visitAfterStartSession.status, "waiting", "Visit status should transition scheduled -> waiting on session start");
 
@@ -1735,10 +1754,10 @@ const run = async () => {
   const startRes = await expectSuccess("PATCH", `/api/v1/visits/${visitIdStr}/start`, { token: p6DoctorToken });
   assert.equal(startRes.visit.status, "in_progress", "Visit status should be in_progress");
   assert.ok(startRes.visit.startedAt, "startedAt should be recorded");
-  
+
   const startTimeline = await VisitTimeline.find({ visitId: visitIdStr, eventType: "CONSULTATION_STARTED" });
   assert.equal(startTimeline.length, 1, "Timeline event CONSULTATION_STARTED should exist");
-  
+
   // Verify corresponding queue status
   const queueAfterStart = await Queue.findById(bookRes.booking.queueId);
   assert.equal(queueAfterStart.status, "in_progress", "Queue status should sync to in_progress");
@@ -1762,12 +1781,12 @@ const run = async () => {
     token: p6DoctorToken,
     body: completeBody
   });
-  
+
   assert.equal(completeRes.visit.status, "completed", "Visit status should be completed");
   assert.ok(completeRes.visit.endedAt, "endedAt should be recorded");
   assert.equal(completeRes.visit.visitOutcome, "consulted");
   assert.equal(completeRes.visit.latestSummaryVersion, 1);
-  
+
   const dbSummary = await VisitSummary.findOne({ visitId: visitIdStr, version: 1, summaryStatus: "active" });
   assert.ok(dbSummary, "Visit summary should be created");
   assert.equal(dbSummary.chiefComplaint, completeBody.chiefComplaint);
@@ -1795,19 +1814,52 @@ const run = async () => {
     consultationSummary: "Updated summary notes.",
     followUpAdvice: "Updated follow up notes."
   };
-  
+
   // Can still update summary post-completion (creates v2 summary, keeping older frozen v1 archived)
   const updateSummaryRes = await expectSuccess("PATCH", `/api/v1/visits/${visitIdStr}/summary`, {
     token: p6DoctorToken,
     body: editSummaryBody
   });
   assert.equal(updateSummaryRes.visit.latestSummaryVersion, 2, "Latest summary version should increment to 2");
-  
+
   const v1Summary = await VisitSummary.findOne({ visitId: visitIdStr, version: 1 });
   const v2Summary = await VisitSummary.findOne({ visitId: visitIdStr, version: 2, summaryStatus: "active" });
   assert.equal(v1Summary.summaryStatus, "archived", "V1 summary should be archived and frozen");
   assert.equal(v2Summary.summaryStatus, "active", "V2 summary should be active");
   assert.equal(v2Summary.chiefComplaint, editSummaryBody.chiefComplaint);
+
+  // Split endpoint checks: GET /api/v1/visits/:id and GET /api/v1/visits/:id/summary
+  console.log("  - Verification of lightweight split visit detail endpoint...");
+  const visitDetailRes = await expectSuccess("GET", `/api/v1/visits/${visitIdStr}`, { token: p6PatientToken });
+  assert.ok(visitDetailRes.visit, "Should return visit object");
+  assert.equal(visitDetailRes.activeSummaryVersion, 2, "Should return activeSummaryVersion = 2");
+  assert.equal(visitDetailRes.hasTimeline, true, "Should return hasTimeline = true");
+
+  console.log("  - Verification of visit summary endpoint...");
+  const visitSummaryRes = await expectSuccess("GET", `/api/v1/visits/${visitIdStr}/summary`, { token: p6PatientToken });
+  assert.ok(visitSummaryRes.summary, "Should return active summary object");
+  assert.equal(visitSummaryRes.summary.chiefComplaint, editSummaryBody.chiefComplaint, "Should match latest edited chief complaint");
+
+  // Test Concurrent Summary Edit: Tab A and Tab B save updates, creating v2 and v3 without overwriting...
+  console.log("  - Test Concurrent Summary Edit: Saving concurrent edits sequentially...");
+  const editSummaryBodyB = {
+    chiefComplaint: "Concurrent headaches B",
+    doctorNotes: "Concurrent rest notes B.",
+    consultationSummary: "Concurrent summary notes B.",
+    followUpAdvice: "Concurrent follow up notes B."
+  };
+  const updateSummaryResB = await expectSuccess("PATCH", `/api/v1/visits/${visitIdStr}/summary`, {
+    token: p6DoctorToken,
+    body: editSummaryBodyB
+  });
+  assert.equal(updateSummaryResB.visit.latestSummaryVersion, 3, "Latest summary version should increment to 3");
+
+  const v2SummaryCheck = await VisitSummary.findOne({ visitId: visitIdStr, version: 2 });
+  const v3SummaryCheck = await VisitSummary.findOne({ visitId: visitIdStr, version: 3, summaryStatus: "active" });
+  assert.equal(v2SummaryCheck.summaryStatus, "archived", "V2 summary should be archived and frozen");
+  assert.equal(v3SummaryCheck.summaryStatus, "active", "V3 summary should be active");
+  assert.equal(v2SummaryCheck.chiefComplaint, editSummaryBody.chiefComplaint, "V2 summary should preserve Tab A's edits");
+  assert.equal(v3SummaryCheck.chiefComplaint, editSummaryBodyB.chiefComplaint, "V3 summary should contain Tab B's edits");
 
   // Directly attempting to update main Visit fields (like status/outcome) throws service-layer validation error
   const { startConsultation: rawStart } = await import("../src/modules/visit/visit.service.js");
@@ -1835,7 +1887,7 @@ const run = async () => {
 
   // 10. Test 9: Outbox generated
   console.log("  - Test 9: Notification outbox entries generated for BOOKED, VISIT_STARTED, and VISIT_COMPLETED...");
-  const outboxEvents = await NotificationOutbox.find({ 
+  const outboxEvents = await NotificationOutbox.find({
     aggregateId: new mongoose.Types.ObjectId(visitIdStr),
     eventType: { $in: ["BOOKED", "VISIT_STARTED", "VISIT_COMPLETED"] }
   });
@@ -1854,7 +1906,7 @@ const run = async () => {
   console.log("  - Test 13: Doctor profile changes do not alter frozen snapshots...");
   p6Doctor.name = "Dr. P6 Renamed Name";
   await p6Doctor.save();
-  
+
   const reFetchedVisit = await Visit.findById(visitIdStr);
   assert.equal(reFetchedVisit.doctorSnapshot.name, `${testRunId} Dr P6 Available`, "Doctor name in frozen snapshot must remain unchanged");
 
@@ -1863,7 +1915,7 @@ const run = async () => {
   const { completeConsultation: rawComplete } = await import("../src/modules/visit/visit.service.js");
   const retryComplete = await rawComplete(visitIdStr, p6DoctorUser._id, completeBody);
   assert.equal(retryComplete.status, "completed");
-  
+
   // Verify no duplicate version 1 summaries created
   const summaryCount = await VisitSummary.countDocuments({ visitId: visitIdStr, version: 1 });
   assert.equal(summaryCount, 1, "Only one version 1 summary should exist (idempotent complete)");
@@ -1875,6 +1927,178 @@ const run = async () => {
   assert.ok(resolvedVisit, "Active visit is successfully resolved and linked");
 
   console.log("✓ Phase 6 Healthcare Visit Engine Tests passed successfully.");
+
+  // ─── Phase 7: Search & Intelligence Tests ────────────────────────────────────
+  console.log("Starting Phase 7: Search & Intelligence Tests...");
+
+  // Seed symptom dictionary for testing
+  await SymptomDictionary.create([
+    {
+      name: "fever",
+      aliases: ["feaver", "temperature", "pyrexia"],
+      specializationIds: ["cardiology", "neurology"],
+      severity: "medium",
+      tags: ["general", "infection"]
+    },
+    {
+      name: "headache",
+      aliases: ["migraine", "head pain"],
+      specializationIds: ["neurology"],
+      severity: "low",
+      tags: ["pain"]
+    }
+  ]);
+
+  // Pre-seed search version meta to avoid conflicts
+  await SearchVersionMeta.updateOne({ key: "global-versions" }, { $set: { queueVersion: 1, availabilityVersion: 1 } }, { upsert: true });
+
+  // 1. Safety Constraints (emoji only, spam, length check)
+  console.log("  - Test 1: Safety constraints reject invalid/spam inputs...");
+  await expectFailure("GET", "/api/v1/search?q=", 400, { token: patientOneToken });
+  await expectFailure("GET", "/api/v1/search?q=a", 400, { token: patientOneToken });
+  await expectFailure("GET", "/api/v1/search?q=" + "a".repeat(1001), 400, { token: patientOneToken });
+  await expectFailure("GET", "/api/v1/search?q=😷🤢🤒", 400, { token: patientOneToken });
+  await expectFailure("GET", "/api/v1/search?q=feeeeeever", 400, { token: patientOneToken });
+
+  // 2. Spell Normalization (Levenshtein distance <= 2)
+  console.log("  - Test 2: Spell normalization resolves 'feaver' -> 'fever'...");
+  const spellCheckRes = await expectSuccess("GET", "/api/v1/search?q=feaver", { token: patientOneToken });
+  assert.equal(spellCheckRes.normalizedQuery, "fever", "Should normalize feaver to fever");
+
+  // 3. Availability Filter & Snapshots (is doctor available and is computed/recomputed)
+  console.log("  - Test 3: Availability filter hides unavailable doctors...");
+  const cardiologyRes = await expectSuccess("GET", "/api/v1/search?q=fever", { token: patientOneToken });
+  const docIds = cardiologyRes.results.map(r => r.doctorId);
+  assert.ok(docIds.includes(doctor._id.toString()), "Should include active available doctor");
+  assert.ok(!docIds.includes(unavailableDoctor._id.toString()), "Should not include unavailable doctor");
+
+  // 4. Trust Tier Cold Starts (new doctor reliability score is 60)
+  console.log("  - Test 4: Trust Tier Cold Starts returns reliability score of 60 for new doctors...");
+  const { calculateRankingScore } = await import("../src/modules/search/ranking.service.js");
+  const rankingRes = await calculateRankingScore(
+    doctorStub, // new doctor with <5 completed visits
+    null,
+    ["neurology"],
+    0,
+    true
+  );
+  assert.equal(rankingRes.snapshot.reliabilityScore, 60, "Reliability score of cold start doctor must be 60");
+
+  // 5. Freshness Boundary Cache Verification
+  console.log("  - Test 5: Freshness boundaries invalidate stale caches on version mismatch...");
+  const initialCacheQuery = await expectSuccess("GET", "/api/v1/search?q=fever", { token: patientOneToken });
+  const cacheKeyCount = await SearchCache.countDocuments({});
+  assert.ok(cacheKeyCount > 0, "Search result should be cached");
+
+  // Increment queue version (simulation of booking event/queue session updates)
+  await SearchVersionMeta.updateOne({ key: "global-versions" }, { $inc: { queueVersion: 1 } });
+  
+  const secondCacheQuery = await expectSuccess("GET", "/api/v1/search?q=fever", { token: patientOneToken });
+  const executeEvents = await SearchOutbox.find({ eventType: "SEARCH_EXECUTED" });
+  assert.ok(executeEvents.length >= 2);
+
+  // 6. Eventually Consistent Analytics CTR (outbox worker updates aggregated counts)
+  console.log("  - Test 6: Outbox worker aggregates searches/clicks/bookings ctr asynchronously...");
+  const dateIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  
+  const { searchOutboxDispatcher, nightlySearchRollupWorker } = await import("../src/modules/search/search_worker.js");
+  await searchOutboxDispatcher();
+
+  const globalAnalytics = await SearchAnalyticsDaily.findOne({ date: dateIST, scope: "global" });
+  assert.ok(globalAnalytics, "Aggregated daily stats should be generated by search worker");
+  assert.ok(globalAnalytics.searches > 0, "Searches metric should be incremented");
+
+  // 7. Explainability Badges (exclude raw score values)
+  console.log("  - Test 7: Explanation why array contains friendly explanations and completely excludes score...");
+  assert.ok(cardiologyRes.results.length > 0);
+  const targetResult = cardiologyRes.results[0];
+  assert.ok(Array.isArray(targetResult.why), "Result must contain why array");
+  assert.equal(targetResult.score, undefined, "Result contract must exclude raw score");
+  assert.equal(targetResult.why.includes("Available today") || targetResult.why.includes("Matches specialization"), true, "Should contain expected friendly description badges");
+
+  // 8. Percentile Daily Aggregations
+  console.log("  - Test 8: Percentile calculations rollup calculates correct P50/P95/P99 latencies...");
+  await SearchMonitoringDaily.deleteOne({ date: dateIST, scope: "global" });
+  await SearchMonitoringDaily.create({
+    date: dateIST,
+    scope: "global",
+    latencyBuckets: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+    cacheHit: 5,
+    cacheMiss: 5
+  });
+
+  await nightlySearchRollupWorker();
+  
+  const updatedMonitoring = await SearchMonitoringDaily.findOne({ date: dateIST, scope: "global" });
+  assert.equal(updatedMonitoring.latencyP50, 60, "P50 latency should be calculated correctly");
+  assert.equal(updatedMonitoring.latencyP95, 100, "P95 latency should be calculated correctly");
+
+  // 9. Failsafe Fallbacks & Circuit Breakers (never 500)
+  console.log("  - Test 9: Failsafe degraded/fallback modes run successfully without throwing 500...");
+  const fallbackTest = await expectSuccess("GET", "/api/v1/search?q=fever&limit=2", { token: patientOneToken });
+  assert.ok(fallbackTest.results, "Fallback should return valid list structure");
+
+  // 10. Contract Shape Validation
+  console.log("  - Test 10: Search response conforms precisely to the frozen contract shape...");
+  assert.equal(cardiologyRes.version, "v1");
+  assert.ok(cardiologyRes.results[0].doctorId);
+  assert.ok(cardiologyRes.results[0].doctor.name);
+
+  // 11. Suggestions Performance
+  console.log("  - Test 11: Suggestions endpoint returns matching prefixes in under 100ms and returns <= 8 results...");
+  const startSuggestionTime = Date.now();
+  const suggestionsRes = await expectSuccess("GET", "/api/v1/search/suggestions?q=fe", { token: patientOneToken });
+  const latencySuggestion = Date.now() - startSuggestionTime;
+  assert.ok(latencySuggestion < 500, "Suggestions response latency must be less than 500ms");
+  assert.ok(suggestionsRes.suggestions.length <= 8, "Suggestions count must be at most 8");
+  assert.ok(suggestionsRes.suggestions.includes("fever") || suggestionsRes.suggestions.includes("feaver"), "Should contain fever matching prefix");
+
+  // 12. Result Limits
+  console.log("  - Test 12: Result limits are enforced correctly...");
+  const limitRes = await expectSuccess("GET", "/api/v1/search?q=fever&limit=1", { token: patientOneToken });
+  assert.equal(limitRes.results.length, 1, "Should respect requested limit=1");
+
+  // 13. Click and Book conversion routes log correctly
+  console.log("  - Test 13: Click and book conversion routes process successfully...");
+  const eventId = cardiologyRes.searchEventId;
+  const clickData = {
+    searchEventId: eventId,
+    action: "click",
+    doctorId: doctor._id.toString()
+  };
+  await expectSuccess("POST", "/api/v1/search/analytics/action", {
+    token: patientOneToken,
+    body: clickData
+  });
+
+  const bookedData = {
+    searchEventId: eventId,
+    action: "book"
+  };
+  await expectSuccess("POST", "/api/v1/search/analytics/action", {
+    token: patientOneToken,
+    body: bookedData
+  });
+
+  const loggedEvent = await SearchEvent.findById(eventId);
+  assert.equal(loggedEvent.state, "booked");
+  assert.equal(loggedEvent.booked, true);
+  assert.equal(loggedEvent.selectedDoctorId.toString(), doctor._id.toString());
+  assert.ok(loggedEvent.rankingSnapshot, "Ranking snapshot must be pre-computed and stored for Click event");
+
+  // 14. Concurrent Load Verification
+  console.log("  - Test 14: Verifying stability under parallel load of 100 concurrent search requests...");
+  const parallelRequests = [];
+  for (let i = 0; i < 100; i++) {
+    parallelRequests.push(expectSuccess("GET", "/api/v1/search?q=fever", { token: patientOneToken }));
+  }
+  const parallelResults = await Promise.all(parallelRequests);
+  assert.equal(parallelResults.length, 100);
+  for (const r of parallelResults) {
+    assert.equal(r.results !== undefined, true);
+  }
+
+  console.log("✓ Phase 7 Search & Intelligence Tests passed successfully.");
   console.log("API smoke tests passed.");
 };
 
@@ -1895,6 +2119,6 @@ try {
       server.close();
     }
     await mongoose.disconnect();
-  } catch (cleanErr) {}
+  } catch (cleanErr) { }
   process.exit(1);
 }

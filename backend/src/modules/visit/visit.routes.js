@@ -3,6 +3,7 @@ import {
   getPatientVisits,
   getPatientVisitDetail,
   getPatientVisitTimeline,
+  getPatientVisitSummary,
   getDoctorVisits,
   startVisit,
   completeVisit,
@@ -22,6 +23,7 @@ router.get("/doctor", authMiddleware, authorizeRoles("doctor"), ensureDoctorActi
 
 // ── Shared detail endpoints ──────────────────────────────────────────────────
 router.get("/:id", authMiddleware, getPatientVisitDetail);
+router.get("/:id/summary", authMiddleware, getPatientVisitSummary);
 router.get("/:id/timeline", authMiddleware, getPatientVisitTimeline);
 
 // ── Doctor consultation execution endpoints ──────────────────────────────────

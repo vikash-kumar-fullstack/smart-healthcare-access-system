@@ -49,6 +49,10 @@ export default function PatientLayout() {
       path: "/patient"
     },
     {
+      name: "Search",
+      path: "/patient/search"
+    },
+    {
       name: "Queue",
       path: "/patient/queue"
     },

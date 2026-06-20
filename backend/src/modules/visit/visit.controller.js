@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Visit from "./visit.model.js";
 import VisitTimeline from "./visit_timeline.model.js";
 import VisitSummary from "./visit_summary.model.js";
+import Doctor from "../doctor/doctor.model.js";
 import {
   createVisit,
   startConsultation,
@@ -53,18 +54,58 @@ export const getPatientVisits = asyncHandler(async (req, res) => {
   return successResponse(res, { visits, nextCursor, hasMore }, "Patient visits retrieved");
 });
 
-// ── GET PATIENT VISIT DETAIL (No Timeline) ───────────────────────────────────
+// ── GET PATIENT VISIT DETAIL (Lightweight Visit Info) ────────────────────────
 export const getPatientVisitDetail = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const visit = await Visit.findOne({ _id: id, patientId: req.user.userId, deletedAt: null });
+  
+  let visit;
+  if (req.user.role === "doctor") {
+    const doctor = await Doctor.findOne({ userId: req.user.userId });
+    if (!doctor) {
+      return errorResponse(res, "Doctor profile not found", 403);
+    }
+    visit = await Visit.findOne({ _id: id, doctorId: doctor._id, deletedAt: null });
+  } else {
+    visit = await Visit.findOne({ _id: id, patientId: req.user.userId, deletedAt: null });
+  }
+
+  if (!visit) {
+    return errorResponse(res, "Visit not found", 404);
+  }
+
+  const hasTimeline = !!(await VisitTimeline.exists({ visitId: visit._id, deletedAt: null }));
+
+  return successResponse(res, {
+    visit,
+    activeSummaryVersion: visit.latestSummaryVersion || 0,
+    hasTimeline
+  }, "Visit details retrieved");
+});
+
+// ── GET PATIENT VISIT SUMMARY ────────────────────────────────────────────────
+export const getPatientVisitSummary = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  
+  let visit;
+  if (req.user.role === "doctor") {
+    const doctor = await Doctor.findOne({ userId: req.user.userId });
+    if (!doctor) {
+      return errorResponse(res, "Doctor profile not found", 403);
+    }
+    visit = await Visit.findOne({ _id: id, doctorId: doctor._id, deletedAt: null });
+  } else {
+    visit = await Visit.findOne({ _id: id, patientId: req.user.userId, deletedAt: null });
+  }
+
   if (!visit) {
     return errorResponse(res, "Visit not found", 404);
   }
 
   const activeSummary = await VisitSummary.findOne({ visitId: visit._id, summaryStatus: "active", deletedAt: null });
 
-  return successResponse(res, { visit, summary: activeSummary }, "Visit details retrieved");
+  return successResponse(res, { summary: activeSummary }, "Visit summary retrieved");
 });
+
 
 // ── GET PATIENT VISIT TIMELINE ───────────────────────────────────────────────
 export const getPatientVisitTimeline = asyncHandler(async (req, res) => {

@@ -98,6 +98,30 @@ export default function DoctorDashboard() {
     overrides: []
   });
 
+  const [clinicalModalOpen, setClinicalModalOpen] = useState(false);
+  const [editingVisitId, setEditingVisitId] = useState(null);
+  const [clinicalForm, setClinicalForm] = useState({
+    chiefComplaint: "",
+    doctorNotes: "",
+    consultationSummary: "",
+    followUpAdvice: "",
+    visitOutcome: "consulted"
+  });
+
+  const activeVisitId = editingVisitId || currentPatient?.visitId;
+
+  useEffect(() => {
+    if (!clinicalModalOpen || !activeVisitId) return;
+
+    const timer = setTimeout(() => {
+      localStorage.setItem(`visitDraft_${activeVisitId}`, JSON.stringify(clinicalForm));
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [clinicalForm, clinicalModalOpen, activeVisitId]);
+
+
+
   // ── Fetch doctor profile ────────────────────────────────────────────────────
   const fetchProfile = async (silent = false) => {
     try {
@@ -350,6 +374,134 @@ export default function DoctorDashboard() {
       toast.error(err.response?.data?.message || "Action failed", { id: t });
     }
   };
+
+  // ── Visit action handlers ──────────────────────────────────────────────────
+  const handleStartConsultation = async (visitId) => {
+    setActionLoading(true);
+    const t = toast.loading("Starting consultation...");
+    try {
+      await api.patch(`/visits/${visitId}/start`);
+      toast.success("Consultation started!", { id: t });
+      await fetchQueue();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to start consultation", { id: t });
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleOpenCompleteConsultation = () => {
+    const activeVisitId = currentPatient?.visitId;
+    if (!activeVisitId) return;
+
+    const savedDraft = localStorage.getItem(`visitDraft_${activeVisitId}`);
+    if (savedDraft) {
+      try {
+        setClinicalForm(JSON.parse(savedDraft));
+        toast.success("Restored unsaved draft notes.");
+      } catch (e) {
+        console.error("Failed to parse draft", e);
+        setClinicalForm({
+          chiefComplaint: "",
+          doctorNotes: "",
+          consultationSummary: "",
+          followUpAdvice: "",
+          visitOutcome: "consulted"
+        });
+      }
+    } else {
+      setClinicalForm({
+        chiefComplaint: "",
+        doctorNotes: "",
+        consultationSummary: "",
+        followUpAdvice: "",
+        visitOutcome: "consulted"
+      });
+    }
+    setEditingVisitId(null);
+    setClinicalModalOpen(true);
+  };
+
+  const handleOpenEditEMR = async (visitId) => {
+    const t = toast.loading("Loading EMR details...");
+    try {
+      const [visitRes, summaryRes] = await Promise.all([
+        api.get(`/visits/${visitId}`),
+        api.get(`/visits/${visitId}/summary`)
+      ]);
+      const visit = visitRes.data.data.visit;
+      const summary = summaryRes.data.data.summary;
+      
+      const savedDraft = localStorage.getItem(`visitDraft_${visitId}`);
+      if (savedDraft) {
+        try {
+          setClinicalForm(JSON.parse(savedDraft));
+          toast.success("Restored unsaved draft edits.");
+        } catch (e) {
+          console.error("Failed to parse draft", e);
+          setClinicalForm({
+            chiefComplaint: summary?.chiefComplaint || "",
+            doctorNotes: summary?.doctorNotes || "",
+            consultationSummary: summary?.consultationSummary || "",
+            followUpAdvice: summary?.followUpAdvice || "",
+            visitOutcome: visit?.visitOutcome || "consulted"
+          });
+        }
+      } else {
+        setClinicalForm({
+          chiefComplaint: summary?.chiefComplaint || "",
+          doctorNotes: summary?.doctorNotes || "",
+          consultationSummary: summary?.consultationSummary || "",
+          followUpAdvice: summary?.followUpAdvice || "",
+          visitOutcome: visit?.visitOutcome || "consulted"
+        });
+      }
+      setEditingVisitId(visitId);
+      setClinicalModalOpen(true);
+      toast.dismiss(t);
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to load EMR details", { id: t });
+    }
+  };
+
+  const handleSubmitClinicalForm = async (e) => {
+    e.preventDefault();
+    if (!clinicalForm.chiefComplaint || !clinicalForm.doctorNotes || !clinicalForm.consultationSummary) {
+      toast.error("Please fill in all required fields.");
+      return;
+    }
+
+    const t = toast.loading("Saving EMR summary...");
+    try {
+      if (editingVisitId) {
+        await api.patch(`/visits/${editingVisitId}/summary`, {
+          chiefComplaint: clinicalForm.chiefComplaint,
+          doctorNotes: clinicalForm.doctorNotes,
+          consultationSummary: clinicalForm.consultationSummary,
+          followUpAdvice: clinicalForm.followUpAdvice
+        });
+        localStorage.removeItem(`visitDraft_${editingVisitId}`);
+        toast.success("EMR Summary updated successfully!", { id: t });
+      } else {
+        await api.patch(`/visits/${currentPatient.visitId}/complete`, clinicalForm);
+        localStorage.removeItem(`visitDraft_${currentPatient.visitId}`);
+        toast.success("Consultation completed and EMR Summary created!", { id: t });
+      }
+      setClinicalModalOpen(false);
+      setEditingVisitId(null);
+      setClinicalForm({
+        chiefComplaint: "",
+        doctorNotes: "",
+        consultationSummary: "",
+        followUpAdvice: "",
+        visitOutcome: "consulted"
+      });
+      await fetchQueue();
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to save clinical details", { id: t });
+    }
+  };
+
 
   const cfg             = SESSION_CONFIG[sessionStatus] || SESSION_CONFIG.inactive;
 
@@ -725,12 +877,21 @@ export default function DoctorDashboard() {
             </div>
 
             <div className="flex flex-wrap gap-2.5 self-center">
-              <button
-                onClick={() => patientAction("/queue/complete", { queueId: currentPatient._id }, "Patient consultation completed!")}
-                className="bg-green-600 hover:bg-green-700 active:scale-95 transition text-white px-5 py-3 rounded-xl font-semibold text-sm shadow-md flex items-center gap-1.5"
-              >
-                <span>✅</span> Complete
-              </button>
+              {currentPatient.visitId && (currentPatient.visitStatus === "waiting" || currentPatient.visitStatus === "scheduled") ? (
+                <button
+                  onClick={() => handleStartConsultation(currentPatient.visitId)}
+                  className="bg-blue-600 hover:bg-blue-700 active:scale-95 transition text-white px-5 py-3 rounded-xl font-semibold text-sm shadow-md flex items-center gap-1.5 animate-pulse"
+                >
+                  <span>🩺</span> Start Consultation
+                </button>
+              ) : (
+                <button
+                  onClick={handleOpenCompleteConsultation}
+                  className="bg-green-600 hover:bg-green-700 active:scale-95 transition text-white px-5 py-3 rounded-xl font-semibold text-sm shadow-md flex items-center gap-1.5"
+                >
+                  <span>✅</span> Complete Consultation
+                </button>
+              )}
               <button
                 onClick={() => patientAction("/queue/skip", { queueId: currentPatient._id }, "Patient skipped.")}
                 className="bg-amber-500 hover:bg-amber-600 active:scale-95 transition text-white px-5 py-3 rounded-xl font-semibold text-sm shadow-md flex items-center gap-1.5"
@@ -844,7 +1005,17 @@ export default function DoctorDashboard() {
                       </p>
                     </div>
                   </div>
-                  <StatusBadge status={patient.status} />
+                  <div className="flex items-center gap-3">
+                    <StatusBadge status={patient.status} />
+                    {patient.visitId && patient.status === "completed" && (
+                      <button
+                        onClick={() => handleOpenEditEMR(patient.visitId)}
+                        className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold px-2.5 py-1 rounded-lg border border-blue-200 transition active:scale-95 flex items-center gap-1"
+                      >
+                        <span>📝</span> View/Edit EMR
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -1083,6 +1254,115 @@ export default function DoctorDashboard() {
 
         </form>
       </div>
+
+      {/* ── Clinical Modal (EMR Entry/Edit) ─────────────────────────────────── */}
+      {clinicalModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl border shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-250">
+            {/* Header */}
+            <div className="bg-gray-50 border-b px-6 py-4 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-800">
+                {editingVisitId ? "Edit Medical Summary (EMR)" : "Complete Consultation & Record EMR"}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setClinicalModalOpen(false);
+                  setEditingVisitId(null);
+                }}
+                className="text-gray-400 hover:text-gray-600 text-xl font-bold p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSubmitClinicalForm} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Chief Complaint *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Chronic headache, high fever"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  value={clinicalForm.chiefComplaint}
+                  onChange={(e) => setClinicalForm(prev => ({ ...prev, chiefComplaint: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Consultation Summary *</label>
+                <textarea
+                  required
+                  rows="3"
+                  placeholder="Diagnosed migraine, advice rest..."
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  value={clinicalForm.consultationSummary}
+                  onChange={(e) => setClinicalForm(prev => ({ ...prev, consultationSummary: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Doctor Notes (EMR Sensitive) *</label>
+                <textarea
+                  required
+                  rows="3"
+                  placeholder="Clinical observations, vital stats..."
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  value={clinicalForm.doctorNotes}
+                  onChange={(e) => setClinicalForm(prev => ({ ...prev, doctorNotes: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Follow-up Advice</label>
+                <textarea
+                  rows="2"
+                  placeholder="e.g. Review in 7 days if symptom persists"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  value={clinicalForm.followUpAdvice}
+                  onChange={(e) => setClinicalForm(prev => ({ ...prev, followUpAdvice: e.target.value }))}
+                />
+              </div>
+
+              {!editingVisitId && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Visit Outcome *</label>
+                  <select
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                    value={clinicalForm.visitOutcome}
+                    onChange={(e) => setClinicalForm(prev => ({ ...prev, visitOutcome: e.target.value }))}
+                  >
+                    <option value="consulted">Consulted (Normal Completion)</option>
+                    <option value="follow_up_required">Follow-up Required</option>
+                    <option value="referred">Referred to Specialist</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="pt-4 border-t flex justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClinicalModalOpen(false);
+                    setEditingVisitId(null);
+                  }}
+                  className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm font-medium text-gray-600 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold shadow-sm transition active:scale-95"
+                >
+                  {editingVisitId ? "Save Changes" : "Complete Visit"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -253,7 +253,7 @@ const executeBookQueue = async (userId, doctorId, bookingDate) => {
     if (existing.doctorId.toString() === doctorId.toString()) {
       const session = await getOrCreateSession(doctorId, bookingDateStr);
       if (existing.sessionId.toString() === session._id.toString()) {
-        const isRecentRetry = (Date.now() - new Date(existing.createdAt).getTime()) < 1500;
+        const isRecentRetry = (Date.now() - new Date(existing.createdAt).getTime()) < 60000;
         if (isRecentRetry) {
           const Visit = mongoose.model("Visit");
           const visit = await Visit.findOne({ queueId: existing._id, deletedAt: null });
@@ -1498,6 +1498,14 @@ export const getDoctorQueue = async (doctorId) => {
     .populate("userId", "name")
     .sort({ queueNumber: 1 });
 
+  const VisitModel = mongoose.model("Visit");
+  const queueIds = allPatients.map(q => q._id);
+  const visitsList = await VisitModel.find({ queueId: { $in: queueIds }, deletedAt: null }).lean();
+  const visitMap = {};
+  for (const v of visitsList) {
+    visitMap[v.queueId.toString()] = v;
+  }
+
   let waiting = 0;
   let completed = 0;
   let skipped = 0;
@@ -1510,6 +1518,7 @@ export const getDoctorQueue = async (doctorId) => {
   const history = [];
 
   for (const q of allPatients) {
+    const vDoc = visitMap[q._id.toString()];
     const patientObj = {
       _id: q._id,
       name: q.userId?.name || "Unknown Patient",
@@ -1518,7 +1527,9 @@ export const getDoctorQueue = async (doctorId) => {
       isPriority: q.isPriority || false,
       createdAt: q.createdAt,
       startedAt: q.startedAt,
-      completedAt: q.completedAt
+      completedAt: q.completedAt,
+      visitId: vDoc ? vDoc._id : null,
+      visitStatus: vDoc ? vDoc.status : null
     };
 
     if (q.status === "in_progress") {
@@ -1583,7 +1594,10 @@ export const getDoctorQueue = async (doctorId) => {
       elapsed,
       eta: roundMins(remMins),
       status: currentPatient.status,
-      queueNumber: currentPatient.queueNumber
+      queueNumber: currentPatient.queueNumber,
+      isPriority: currentPatient.isPriority,
+      visitId: currentPatient.visitId,
+      visitStatus: currentPatient.visitStatus
     };
   }
 

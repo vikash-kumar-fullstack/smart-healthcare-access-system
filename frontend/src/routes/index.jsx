@@ -4,6 +4,7 @@ import Signup from "../pages/Signup";
 import ProtectedRoute from "./ProtectedRoute";
 import PatientLayout from "../layouts/PatientLayout";
 import Dashboard from "../pages/patient/Dashboard";
+import PatientSearch from "../pages/patient/Search";
 import Queue from "../pages/patient/Queue";
 import History from "../pages/patient/History";
 import Notifications from "../pages/patient/Notifications";
@@ -29,6 +30,10 @@ export default function AppRoutes() {
             }
           >
           <Route index element={<Dashboard />} />
+          <Route
+            path="search"
+            element={<PatientSearch />}
+          />
           <Route
             path="queue"
             element={<Queue />}
