@@ -14,6 +14,14 @@ import Analytics from "../pages/doctor/Analytics";
 import MedicalRecords from "../pages/MedicalRecords";
 import RecordDetails from "../pages/RecordDetails";
 import MedicalTimeline from "../pages/MedicalTimeline";
+import AdminLayout from "../layouts/AdminLayout";
+import AdminDashboard from "../pages/admin/Dashboard";
+import AdminHospitals from "../pages/admin/Hospitals";
+import AdminDoctors from "../pages/admin/Doctors";
+import AdminQueues from "../pages/admin/Queues";
+import AdminReports from "../pages/admin/Reports";
+import AdminHealth from "../pages/admin/Health";
+import AdminAudits from "../pages/admin/AuditLogs";
 
 export default function AppRoutes() {
   return (
@@ -92,6 +100,23 @@ export default function AppRoutes() {
           element={<MedicalTimeline />}
         />
       </Route>
+        {/* Admin */}
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute role="admin">
+              <AdminLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<AdminDashboard />} />
+          <Route path="hospitals" element={<AdminHospitals />} />
+          <Route path="doctors" element={<AdminDoctors />} />
+          <Route path="queues" element={<AdminQueues />} />
+          <Route path="reports" element={<AdminReports />} />
+          <Route path="health" element={<AdminHealth />} />
+          <Route path="audits" element={<AdminAudits />} />
+        </Route>
       </Routes>
     </BrowserRouter>
   );

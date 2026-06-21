@@ -13,18 +13,26 @@ export default function ProtectedRoute({
     return <Navigate to="/login" replace />;
   }
 
+  const isAdminRole = (r) => ["admin", "super_admin", "district_admin", "hospital_admin"].includes(r);
+
   // Wrong role
-  if (role && userRole !== role) {
+  if (role) {
+    const roleMatch = (role === "admin" && isAdminRole(userRole)) || userRole === role;
+    if (!roleMatch) {
+      if (userRole === "doctor") {
+        return <Navigate to="/doctor" replace />;
+      }
 
-    if (userRole === "doctor") {
-      return <Navigate to="/doctor" replace />;
+      if (userRole === "patient") {
+        return <Navigate to="/patient" replace />;
+      }
+
+      if (isAdminRole(userRole)) {
+        return <Navigate to="/admin" replace />;
+      }
+
+      return <Navigate to="/login" replace />;
     }
-
-    if (userRole === "patient") {
-      return <Navigate to="/patient" replace />;
-    }
-
-    return <Navigate to="/login" replace />;
   }
 
   return children;

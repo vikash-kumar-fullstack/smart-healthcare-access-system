@@ -71,7 +71,7 @@ const doctorSchema = new mongoose.Schema({
 
   status: {
     type: String,
-    enum: ["pending_profile", "pending_activation", "active", "inactive", "suspended"],
+    enum: ["pending_profile", "pending_activation", "active", "inactive", "suspended", "pending", "approved", "verified", "archived"],
     default: "pending_profile"
   },
 

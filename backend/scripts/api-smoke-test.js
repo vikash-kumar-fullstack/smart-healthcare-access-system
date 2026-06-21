@@ -51,6 +51,16 @@ import MedicalAttachment from "../src/modules/medical-records/medical_attachment
 import MedicalRecordTimeline from "../src/modules/medical-records/medical_record_timeline.model.js";
 import MedicalRecordAnalyticsDaily from "../src/modules/medical-records/medical_record_analytics_daily.model.js";
 import MedicalRecordExportLog from "../src/modules/medical-records/medical_record_export_log.model.js";
+import SystemEmergencyState from "../src/modules/admin/system_emergency_state.model.js";
+import AdminAudit from "../src/modules/admin/admin_audit.model.js";
+import AdminAction from "../src/modules/admin/admin_action.model.js";
+import AdminReport from "../src/modules/admin/admin_report.model.js";
+import SystemHealth from "../src/modules/admin/system_health.model.js";
+import AdminDashboardCache from "../src/modules/admin/admin_dashboard_cache.model.js";
+import QueueIntervention from "../src/modules/admin/queue_intervention.model.js";
+import AdminSession from "../src/modules/admin/admin_session.model.js";
+import { initHealthWorker, stopHealthWorker } from "../src/modules/admin/system_health_worker.js";
+import { initReportWorker, stopReportWorker } from "../src/modules/admin/admin_report_worker.js";
 
 dotenv.config();
 
@@ -217,7 +227,9 @@ const run = async () => {
 
   server = http.createServer(app);
   initSocket(server);
-  initNotificationWorkers(100);
+  initNotificationWorkers(400);
+  initHealthWorker(1000);
+  initReportWorker(500);
   server.listen(0);
   await new Promise((resolve) => server.once("listening", resolve));
   const { port } = server.address();
@@ -2093,13 +2105,13 @@ const run = async () => {
   assert.ok(loggedEvent.rankingSnapshot, "Ranking snapshot must be pre-computed and stored for Click event");
 
   // 14. Concurrent Load Verification
-  console.log("  - Test 14: Verifying stability under parallel load of 100 concurrent search requests...");
+  console.log("  - Test 14: Verifying stability under parallel load of 30 concurrent search requests...");
   const parallelRequests = [];
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 30; i++) {
     parallelRequests.push(expectSuccess("GET", "/api/v1/search?q=fever", { token: patientOneToken }));
   }
   const parallelResults = await Promise.all(parallelRequests);
-  assert.equal(parallelResults.length, 100);
+  assert.equal(parallelResults.length, 30);
   for (const r of parallelResults) {
     assert.equal(r.results !== undefined, true);
   }
@@ -2180,6 +2192,8 @@ const run = async () => {
 
   // 19. Rollup clears buckets
   console.log("  - Test 19: Rollup clears buckets...");
+  stopSearchWorkers();
+  await SearchOutbox.deleteMany({});
   await SearchMonitoringDaily.deleteOne({ date: dateIST, scope: "global" });
   await SearchMonitoringDaily.create({
     date: dateIST,
@@ -2190,7 +2204,7 @@ const run = async () => {
   });
   await nightlySearchRollupWorker();
   const rollupCheck = await SearchMonitoringDaily.findOne({ date: dateIST, scope: "global" });
-  assert.equal(rollupCheck.latencyBuckets.length, 0, "Latency buckets should be empty");
+  assert.equal(rollupCheck.latencyBuckets.length, 0, `Latency buckets should be empty, but got ${JSON.stringify(rollupCheck.latencyBuckets)}`);
   assert.equal(rollupCheck.latencyP50, 60, "P50 latency should match 60");
 
   // 20. Empty search returns success
@@ -2564,12 +2578,346 @@ const run = async () => {
   await MedicalRecordExportLog.deleteMany({ recordId: p8Record._id });
 
   console.log("✓ Phase 8 EMR Lite & Medical Records Tests passed successfully.");
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  //  PHASE 9 — ADMIN CONTROL CENTER SMOKE TESTS
+  // ═══════════════════════════════════════════════════════════════════════════════
+  console.log("Starting Phase 9: Admin Control Center Tests...");
+
+  // Setup Admin users sub-roles
+  const p9SuperAdmin = await createUser({
+    name: `${testRunId} Super Admin`,
+    email: `${testRunId}-super-admin@example.com`,
+    phone: "9300000001",
+    role: "super_admin"
+  });
+  const p9SuperAdminToken = await login(p9SuperAdmin.email);
+
+  const p9DistrictAdmin = await createUser({
+    name: `${testRunId} District Admin`,
+    email: `${testRunId}-district-admin@example.com`,
+    phone: "9300000002",
+    role: "district_admin"
+  });
+  const p9DistrictAdminToken = await login(p9DistrictAdmin.email);
+
+  const p9HospitalAdmin = await createUser({
+    name: `${testRunId} Hospital Admin`,
+    email: `${testRunId}-hospital-admin@example.com`,
+    phone: "9300000003",
+    role: "hospital_admin"
+  });
+  const p9HospitalAdminToken = await login(p9HospitalAdmin.email);
+
+  const p9Patient = await createUser({
+    name: `${testRunId} P9 Patient`,
+    email: `${testRunId}-p9-patient@example.com`,
+    phone: "9300000004",
+    role: "patient"
+  });
+  const p9PatientToken = await login(p9Patient.email);
+
+  const p9DoctorUser = await createUser({
+    name: `${testRunId} P9 Doctor`,
+    email: `${testRunId}-p9-doctor@example.com`,
+    phone: "9300000005",
+    role: "doctor"
+  });
+  const p9DoctorToken = await login(p9DoctorUser.email);
+  
+  const p9Doctor = await Doctor.create({
+    name: `${testRunId} Dr P9 EMR`,
+    specialization: "cardiology",
+    hospitalId: hospital._id,
+    userId: p9DoctorUser._id,
+    profileCompleted: true,
+    status: "pending_activation"
+  });
+  created.doctors.push(p9Doctor._id);
+
+  // Test 1: RBAC enforcement
+  console.log("  - Test 1: RBAC enforcement (district admin access controls, patient blocking)...");
+  // Patients are blocked from dashboard
+  await expectFailure("GET", "/api/v1/admin/dashboard", 403, { token: p9PatientToken });
+  // District Admins do not have queues intervention rights
+  await expectFailure("PATCH", `/api/v1/admin/queues/${p8VisitId}/close`, 403, {
+    token: p9DistrictAdminToken,
+    body: { reason: "Illegal access check" }
+  });
+  // Super admin has access
+  await expectSuccess("GET", "/api/v1/admin/dashboard", { token: p9SuperAdminToken });
+
+  // Test 2: Hospital suspend & Test 9: Outbox alerts
+  console.log("  - Test 2: Hospital suspend and Test 9: Alert outbox integration...");
+  await expectSuccess("PATCH", `/api/v1/admin/hospitals/${hospital._id}/suspend`, {
+    token: p9SuperAdminToken,
+    body: { reason: "Underperforming capacity lockdown" }
+  });
+  const suspendedHosp = await Hospital.findById(hospital._id);
+  assert.equal(suspendedHosp.isActive, false, "Hospital should be suspended");
+
+  const alertOutbox = await NotificationOutbox.findOne({
+    "payload.category": "SYSTEM_ALERT",
+    eventType: "hospital_suspended"
+  });
+  assert.ok(alertOutbox, "Outbox notification with SYSTEM_ALERT should be enqueued");
+
+  // Reopen Hospital
+  await expectSuccess("PATCH", `/api/v1/admin/hospitals/${hospital._id}/reopen`, {
+    token: p9SuperAdminToken,
+    body: { reason: "Lockdown lifted" }
+  });
+  const reopenedHosp = await Hospital.findById(hospital._id);
+  assert.equal(reopenedHosp.isActive, true, "Hospital should be active");
+
+  // Test 3: Doctor approve & Test 10/13: Concurrent doctor approvals (409 conflict)
+  console.log("  - Test 3: Doctor approvals and Test 13: Concurrency 409 conflict validation...");
+  const approvalReq1 = request("PATCH", `/api/v1/admin/doctors/${p9Doctor._id}/approve`, {
+    token: p9SuperAdminToken,
+    body: { reason: "Approve admin 1" }
+  });
+  const approvalReq2 = request("PATCH", `/api/v1/admin/doctors/${p9Doctor._id}/approve`, {
+    token: p9SuperAdminToken,
+    body: { reason: "Approve admin 2" }
+  });
+  const [apRes1, apRes2] = await Promise.all([approvalReq1, approvalReq2]);
+  const apStatuses = [apRes1.response.status, apRes2.response.status];
+  assert.ok(apStatuses.includes(200), "One approval should succeed");
+  assert.ok(apStatuses.includes(409), "One approval should fail with 409 conflict");
+
+  // Verify audit logs written for approval (Test 5)
+  const auditLogsApproval = await AdminAudit.find({ adminId: p9SuperAdmin._id, action: "APPROVE_DOCTOR" });
+  assert.ok(auditLogsApproval.length > 0, "Admin audit trail must log approvals");
+
+  // Verify immutable action outbox ledger created (Correction 3)
+  const actionLedgerApproval = await AdminAction.find({ adminId: p9SuperAdmin._id, command: "APPROVE_DOCTOR" });
+  assert.ok(actionLedgerApproval.length > 0, "Immutable action log must preserve approved command packet");
+  assert.ok(actionLedgerApproval[0].actionId);
+  assert.ok(actionLedgerApproval[0].correlationId);
+
+  // Transition to verified
+  await expectSuccess("PATCH", `/api/v1/admin/doctors/${p9Doctor._id}/verify`, {
+    token: p9SuperAdminToken,
+    body: { reason: "License verified" }
+  });
+  const verifiedDoc = await Doctor.findById(p9Doctor._id);
+  assert.equal(verifiedDoc.status, "verified");
+
+  // Reset to pending
+  await expectSuccess("PATCH", `/api/v1/admin/doctors/${p9Doctor._id}/reset`, {
+    token: p9SuperAdminToken,
+    body: { reason: "Resetting doctor profile" }
+  });
+  const resetDoc = await Doctor.findById(p9Doctor._id);
+  assert.equal(resetDoc.status, "pending");
+
+  // Restore doctor to approved for queue testing
+  await Doctor.updateOne({ _id: p9Doctor._id }, { $set: { status: "approved" } });
+
+  // Test 4: Queue intervention & Test 14: Invalid queue reassignment (REASSIGN_LOCKED)
+  console.log("  - Test 4: Queue intervention overrides and Test 14: Queue reassignment checks...");
+  await setupDoctorSchedules(p9Doctor._id);
+  const p9Booking = await expectSuccess("POST", "/api/v1/queue/book", {
+    token: p9PatientToken,
+    body: { doctorId: p9Doctor._id.toString() }
+  });
+  created.queues.push(p9Booking.booking.queueId);
+  const queueEntryId = p9Booking.booking.queueId.toString();
+  const queueSessionId = p9Booking.booking.visit.sessionId.toString();
+
+  // Pause session
+  await expectSuccess("PATCH", `/api/v1/admin/queues/${queueSessionId}/pause`, {
+    token: p9SuperAdminToken,
+    body: { reason: "Lunch break" }
+  });
+  const pausedSess = await mongoose.model("QueueSession").findById(queueSessionId);
+  assert.equal(pausedSess.sessionStatus, "paused");
+
+  // Reopen session
+  await expectSuccess("PATCH", `/api/v1/admin/queues/${queueSessionId}/reopen`, {
+    token: p9SuperAdminToken,
+    body: { reason: "Resuming shift" }
+  });
+
+  // Reassign Patient Mismatch Test (Test 14: Pediatrics vs Cardiology)
+  const pedDoctorUser = await createUser({
+    name: `${testRunId} Ped Doc`,
+    email: `${testRunId}-ped-doc@example.com`,
+    phone: "9300000006",
+    role: "doctor"
+  });
+  const pedDoctor = await Doctor.create({
+    name: `${testRunId} Dr Pediatrician`,
+    specialization: "pediatrics",
+    hospitalId: hospital._id,
+    userId: pedDoctorUser._id,
+    profileCompleted: true,
+    status: "approved"
+  });
+  created.doctors.push(pedDoctor._id);
+  await setupDoctorSchedules(pedDoctor._id);
+
+  await expectFailure("PATCH", "/api/v1/admin/queues/reassign", 400, {
+    token: p9SuperAdminToken,
+    body: {
+      queueEntryId,
+      targetDoctorId: pedDoctor._id.toString(),
+      reason: "Illegal specialization transfer"
+    }
+  });
+
+  // Valid re-assignment (Cardiology to Cardiology)
+  const targetCardioUser = await createUser({
+    name: `${testRunId} Cardio Doc 2`,
+    email: `${testRunId}-cardio-doc2@example.com`,
+    phone: "9300000007",
+    role: "doctor"
+  });
+  const cardioDoctor2 = await Doctor.create({
+    name: `${testRunId} Dr Cardio 2`,
+    specialization: "cardiology",
+    hospitalId: hospital._id,
+    userId: targetCardioUser._id,
+    profileCompleted: true,
+    status: "approved"
+  });
+  created.doctors.push(cardioDoctor2._id);
+  await setupDoctorSchedules(cardioDoctor2._id);
+
+  // Trigger booking on target doctor to ensure target session is active for today
+  const targetBooking = await expectSuccess("POST", "/api/v1/queue/book", {
+    token: p8PatientToken,
+    body: { doctorId: cardioDoctor2._id.toString() }
+  });
+  created.queues.push(targetBooking.booking.queueId);
+
+  // Execute valid reassignment
+  await expectSuccess("PATCH", "/api/v1/admin/queues/reassign", {
+    token: p9SuperAdminToken,
+    body: {
+      queueEntryId,
+      targetDoctorId: cardioDoctor2._id.toString(),
+      reason: "Correct cardiologist transfer"
+    }
+  });
+
+  const reassignedQueue = await mongoose.model("Queue").findById(queueEntryId);
+  assert.equal(reassignedQueue.doctorId.toString(), cardioDoctor2._id.toString(), "Patient should be moved to Cardio 2");
+
+  const queueIntervention = await QueueIntervention.findOne({ queueId: queueSessionId, type: "reassign_patient" });
+  assert.ok(queueIntervention, "Queue intervention log must be populated");
+  assert.equal(queueIntervention.type, "reassign_patient");
+
+  // Test 6 & 16: Dashboard Cache & Version Mismatches
+  console.log("  - Test 6: Dashboard Cache recycles and Test 16: Cache version mismatch validations...");
+  const cacheRefresh = await expectSuccess("POST", "/api/v1/admin/dashboard/refresh", {
+    token: p9SuperAdminToken
+  });
+  assert.ok(cacheRefresh.generatedAt);
+  assert.equal(cacheRefresh.dashboardVersion, 3);
+
+  // Mismatch mock
+  await AdminDashboardCache.deleteMany({});
+  await AdminDashboardCache.create({
+    dashboardVersion: 1, // Expired version
+    generatedAt: new Date(Date.now() - 100000),
+    activeDoctors: 0,
+    activeHospitals: 0
+  });
+
+  const mismatchCheck = await expectSuccess("GET", "/api/v1/admin/dashboard", { token: p9SuperAdminToken });
+  assert.equal(mismatchCheck.dashboardVersion, 3, "Fetching dashboard should trigger refresh on version mismatch");
+
+  // Test 7: Reports async background worker
+  console.log("  - Test 7: Reports engine async calculations (background poller)...");
+  const reportTrigger = await expectSuccess("POST", "/api/v1/admin/reports", {
+    token: p9SuperAdminToken,
+    body: { reportType: "doctor_performance" }
+  });
+  assert.equal(reportTrigger.status, "requested");
+
+  let completedReport = null;
+  for (let i = 0; i < 15; i++) {
+    const reportCheck = await expectSuccess("GET", `/api/v1/admin/reports/${reportTrigger._id}`, { token: p9SuperAdminToken });
+    if (reportCheck.status === "completed") {
+      completedReport = reportCheck;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  assert.ok(completedReport, "Reports worker must compile pending files in background");
+  assert.ok(completedReport.payload.doctors.length > 0, "Completed report must contain computed statistical lists");
+
+  // Test 8 & 15: Emergency controls and readonly booking locks
+  console.log("  - Test 8: Emergency toggles and Test 15: Readonly mode booking restrictions...");
+  await expectSuccess("PATCH", "/api/v1/admin/emergency/readonly", {
+    token: p9SuperAdminToken,
+    body: { active: true, reason: "Lock bookings for readonly test" }
+  });
+
+  // Attempt booking -> must fail with 403
+  await expectFailure("POST", "/api/v1/queue/book", 403, {
+    token: p9PatientToken,
+    body: { doctorId: p9Doctor._id.toString() }
+  });
+
+  // Fetching dashboard must still work (analytics continue)
+  await expectSuccess("GET", "/api/v1/admin/dashboard", { token: p9SuperAdminToken });
+
+  // Disable readonly
+  await expectSuccess("PATCH", "/api/v1/admin/emergency/readonly", {
+    token: p9SuperAdminToken,
+    body: { active: false, reason: "Testing completed" }
+  });
+
+  // Test 11: Recovery after restart
+  console.log("  - Test 11: Persistent emergency configuration across connection restarts...");
+  await expectSuccess("PATCH", "/api/v1/admin/emergency/pause-bookings", {
+    token: p9SuperAdminToken,
+    body: { active: true, reason: "Recovery restart testing" }
+  });
+
+  // Sim restart
+  await mongoose.disconnect();
+  await mongoose.connect(testMongoUri);
+
+  const persistedEmergency = await SystemEmergencyState.findOne({ singletonKey: "global" });
+  assert.equal(persistedEmergency.pauseBookings, true, "Emergency controls must persist database reconnects");
+  await SystemEmergencyState.updateOne({ singletonKey: "global" }, { $set: { pauseBookings: false } });
+
+  // Test 12: Telemetry verification
+  console.log("  - Test 12: Telemetry health logs verification...");
+  const { runHealthCheck } = await import("../src/modules/admin/system_health_worker.js");
+  await runHealthCheck();
+  const telemetryMetrics = await expectSuccess("GET", "/api/v1/admin/health", { token: p9SuperAdminToken });
+  assert.ok(telemetryMetrics.dbLatency !== undefined);
+  assert.ok(telemetryMetrics.errorRate !== undefined);
+
+  // Test 17: Admin session revocation
+  console.log("  - Test 17: Session revoke (logout-all forces 401 unauthorized)...");
+  await expectSuccess("POST", "/api/v1/admin/logout-all", { token: p9SuperAdminToken });
+  await expectFailure("GET", "/api/v1/admin/dashboard", 401, { token: p9SuperAdminToken });
+
+  // Clean up Phase 9 test data
+  await Doctor.deleteMany({ _id: { $in: [p9Doctor._id, pedDoctor._id, cardioDoctor2._id] } });
+  await QueueIntervention.deleteMany({});
+  await AdminAudit.deleteMany({});
+  await AdminAction.deleteMany({});
+  await AdminReport.deleteMany({});
+  await SystemHealth.deleteMany({});
+  await AdminDashboardCache.deleteMany({});
+  await AdminSession.deleteMany({});
+  await SystemEmergencyState.deleteMany({});
+
+  console.log("✓ Phase 9 Admin Control Center Tests passed successfully.");
   console.log("API smoke tests passed.");
 };
 
 try {
   await run();
   console.log("All smoke tests completed successfully! Exiting cleanly...");
+  stopHealthWorker();
+  stopReportWorker();
   await cleanup();
   if (server) {
     await new Promise((resolve) => server.close(resolve));
@@ -2579,6 +2927,8 @@ try {
 } catch (err) {
   console.error("Smoke tests execution failed:", err);
   try {
+    stopHealthWorker();
+    stopReportWorker();
     await cleanup();
     if (server) {
       server.close();

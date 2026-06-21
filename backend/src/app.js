@@ -3,6 +3,7 @@ import cors from "cors";
 import morgan from "morgan";
 import helmet from "helmet";
 import errorHandler from "./middlewares/error.middleware.js";
+import { incrementRequestCount } from "./middlewares/error.middleware.js";
 import { generalLimiter } from "./middlewares/rateLimiter.middleware.js";
 import authRoutes from "./modules/auth/auth.routes.js";
 import adminRoutes from "./modules/admin/admin.routes.js";
@@ -26,6 +27,11 @@ app.use(cors({
 
 // ── Global rate limit (before any routes) ────────────────────────────────────
 app.use(generalLimiter);
+
+app.use((req, res, next) => {
+  incrementRequestCount();
+  next();
+});
 
 // ── Body & logging ────────────────────────────────────────────────────────────
 app.use(express.json({ limit: "10kb" }));   // Prevent large payload attacks

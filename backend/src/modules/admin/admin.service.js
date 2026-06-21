@@ -1,55 +1,72 @@
+import mongoose from "mongoose";
 import Hospital from "../hospital/hospital.model.js";
 import Doctor from "../doctor/doctor.model.js";
 import Queue from "../queue/queue.model.js";
 import User from "../auth/auth.model.js";
+import AdminDashboardCache from "./admin_dashboard_cache.model.js";
+import AdminAudit from "./admin_audit.model.js";
+import AdminAction from "./admin_action.model.js";
+import AdminSession from "./admin_session.model.js";
+import { computeFreshDashboardAnalytics } from "./analytics-admin.service.js";
+
+const EXPECTED_DASHBOARD_VERSION = 3;
+
+export const logAdminAudit = async (adminId, action, targetType, targetId, before, after, reason, requestId = "") => {
+  await AdminAudit.create({
+    adminId,
+    action,
+    targetType,
+    targetId,
+    before: before ? JSON.parse(JSON.stringify(before)) : null,
+    after: after ? JSON.parse(JSON.stringify(after)) : null,
+    reason: reason || "",
+    requestId
+  });
+};
+
+export const logAdminAction = async (adminId, command, payload, correlationId = "") => {
+  await AdminAction.create({
+    adminId,
+    command,
+    payload,
+    correlationId: correlationId || new mongoose.Types.ObjectId().toString(),
+    executedAt: new Date()
+  });
+};
 
 export const getDashboardAnalytics = async () => {
+  let cache = await AdminDashboardCache.findOne().sort({ createdAt: -1 });
 
-  const today = new Date().toISOString().split("T")[0];
+  // Cache Version Validation (Correction 4 & Test 16)
+  if (!cache || cache.dashboardVersion !== EXPECTED_DASHBOARD_VERSION) {
+    const freshData = await computeFreshDashboardAnalytics();
+    cache = await AdminDashboardCache.create({
+      dashboardVersion: EXPECTED_DASHBOARD_VERSION,
+      generatedAt: new Date(),
+      ...freshData
+    });
+  }
 
-  const start = new Date(today);
-  const end = new Date(today);
-  end.setDate(end.getDate() + 1);
+  return cache;
+};
 
-  const totalHospitals = await Hospital.countDocuments({ isActive: true });
-  const totalDoctors = await Doctor.countDocuments({ isAvailable: true });
-  const totalUsers = await User.countDocuments({ role: "patient" });
-
-  const todayBookings = await Queue.find({
-    createdAt: { $gte: start, $lt: end }
+export const forceRefreshDashboardCache = async () => {
+  const freshData = await computeFreshDashboardAnalytics();
+  return await AdminDashboardCache.create({
+    dashboardVersion: EXPECTED_DASHBOARD_VERSION,
+    generatedAt: new Date(),
+    ...freshData
   });
+};
 
-  const totalBookingsToday = todayBookings.length;
+export const getAdminSessions = async (adminId) => {
+  return await AdminSession.find({ adminId }).sort({ createdAt: -1 });
+};
 
-  const completedToday = todayBookings.filter(q => q.status === "completed").length;
-  const cancelledToday = todayBookings.filter(q => q.status === "cancelled").length;
-  const activeToday = todayBookings.filter(q => q.isActive).length;
+export const revokeAllSessions = async (adminId) => {
+  await AdminSession.deleteMany({ adminId });
+};
 
-  const cancellationRate = totalBookingsToday
-    ? (cancelledToday / totalBookingsToday) * 100
-    : 0;
-
-  const completionRate = totalBookingsToday
-    ? (completedToday / totalBookingsToday) * 100
-    : 0;
-
-  return {
-    system: {
-      totalHospitals,
-      totalDoctors,
-      totalUsers
-    },
-
-    today: {
-      totalBookingsToday,
-      completedToday,
-      cancelledToday,
-      activeToday
-    },
-
-    performance: {
-      cancellationRate: Math.round(cancellationRate * 100) / 100,
-      completionRate: Math.round(completionRate * 100) / 100
-    }
-  };
+export const getAdminAudits = async () => {
+  return await AdminAudit.find({}).populate("adminId", "name email").sort({ createdAt: -1 });
 };

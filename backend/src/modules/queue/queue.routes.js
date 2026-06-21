@@ -18,11 +18,28 @@ import { authorizeRoles } from "../../middlewares/authorize.middleware.js";
 import { bookingLimiter } from "../../middlewares/rateLimiter.middleware.js";
 import { ensureDoctorActive } from "../../middlewares/ensureDoctorActive.middleware.js";
 
+import SystemEmergencyState from "../admin/system_emergency_state.model.js";
+
+const checkEmergencyBooking = async (req, res, next) => {
+  try {
+    const emergency = await SystemEmergencyState.findOne({ singletonKey: "global" });
+    if (emergency && (emergency.pauseBookings || emergency.readonly || emergency.maintenance)) {
+      return res.status(403).json({
+        success: false,
+        message: "Booking is currently disabled due to emergency controls"
+      });
+    }
+  } catch (err) {
+    console.error("Emergency booking check failed:", err);
+  }
+  next();
+};
+
 const router = express.Router();
 
 // ── Patient routes ────────────────────────────────────────────────────────────
 // bookingLimiter: 5 attempts / 10 min per user — prevents spam/race conditions
-router.post("/book",    authMiddleware, authorizeRoles("patient"), bookingLimiter, book);
+router.post("/book",    authMiddleware, authorizeRoles("patient"), checkEmergencyBooking, bookingLimiter, book);
 router.get("/my",       authMiddleware, authorizeRoles("patient"), myQueue);
 router.patch("/cancel", authMiddleware, authorizeRoles("patient"), cancel);
 router.get("/history",  authMiddleware, authorizeRoles("patient"), history);

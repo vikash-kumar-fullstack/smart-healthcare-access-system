@@ -1,6 +1,7 @@
 import User from "./auth.model.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 
 
 export const registerUser = async (data) => {
@@ -27,10 +28,23 @@ export const registerUser = async (data) => {
 
 
 export const generateTokens = async (user) => {
+  let adminSessionId = undefined;
+  const isAdmin = ["admin", "super_admin", "district_admin", "hospital_admin"].includes(user.role);
+  if (isAdmin) {
+    adminSessionId = new mongoose.Types.ObjectId().toString();
+    await mongoose.model("AdminSession").create({
+      adminId: user._id,
+      adminSessionId,
+      issuedAt: new Date(),
+      lastActivity: new Date()
+    });
+  }
+
   const accessToken = jwt.sign(
     {
       userId: user._id,
-      role: user.role
+      role: user.role,
+      ...(adminSessionId && { adminSessionId })
     },
     process.env.JWT_SECRET,
     { expiresIn: process.env.NODE_ENV === "test" ? "2h" : "15m" }

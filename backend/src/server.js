@@ -6,6 +6,8 @@ import { initCronJobs } from "./utils/cron.js";
 import { initSocket } from "./utils/socket.js";
 import { initNotificationWorkers } from "./modules/notification/notification_worker.js";
 import { initSearchWorkers } from "./modules/search/search_worker.js";
+import { initHealthWorker } from "./modules/admin/system_health_worker.js";
+import { initReportWorker } from "./modules/admin/admin_report_worker.js";
 
 dotenv.config();
 
@@ -23,6 +25,10 @@ connectDB().then(() => {
   initNotificationWorkers(500);
   // Initialize background search analytics processing workers
   initSearchWorkers(500);
+  // Initialize health telemetry worker
+  initHealthWorker(60000);
+  // Initialize async report builder worker
+  initReportWorker(5000);
 });
 
 server.listen(PORT, () => {

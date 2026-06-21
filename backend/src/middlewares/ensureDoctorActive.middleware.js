@@ -17,14 +17,14 @@ export const ensureDoctorActive = async (req, res, next) => {
       });
     }
 
-    if (doctor.status === "pending_activation") {
+    if (doctor.status === "pending_activation" || doctor.status === "pending") {
       return res.status(403).json({
         success: false,
         message: "Access denied. Your profile is pending administrator approval."
       });
     }
 
-    if (doctor.status !== "active") {
+    if (!["active", "approved", "verified"].includes(doctor.status)) {
       return res.status(403).json({
         success: false,
         message: "Access denied. Doctor account is suspended or inactive."

@@ -1,9 +1,26 @@
+export let requestCount = 0;
+export let errorCount = 0;
+
+export const incrementRequestCount = () => {
+  requestCount++;
+};
+
+export const getTelemetryValues = () => {
+  return { requestCount, errorCount };
+};
+
+export const resetTelemetryCount = () => {
+  requestCount = 0;
+  errorCount = 0;
+};
+
 /**
  * Global error handler middleware.
  * - In development: returns full stack trace for easy debugging.
  * - In production: returns clean message only, never leaks internals.
  */
 const errorHandler = (err, req, res, next) => {
+  errorCount++;
   const isDev    = process.env.NODE_ENV !== "production";
   const status   = err.status || err.statusCode || 500;
   const message  = err.message || "An unexpected error occurred.";
