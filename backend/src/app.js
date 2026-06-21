@@ -12,6 +12,7 @@ import hospitalRoutes from "./modules/hospital/hospital.routes.js";
 import doctorRoutes from "./modules/doctor/doctor.routes.js";
 import searchRoutes from "./modules/search/search.routes.js";
 import visitRoutes from "./modules/visit/visit.routes.js";
+import medicalRecordRoutes from "./modules/medical-records/medical_record.routes.js";
 
 const app = express();
 
@@ -52,6 +53,7 @@ app.use("/api/v1/doctors",       doctorRoutes);
 app.use("/api/v1/search",        searchRoutes);
 app.use("/api/v1/admin",         adminRoutes);
 app.use("/api/v1/visits",        visitRoutes);
+app.use("/api/v1/medical-records", medicalRecordRoutes);
 
 // ── 404 handler ───────────────────────────────────────────────────────────────
 app.use((req, res) => {

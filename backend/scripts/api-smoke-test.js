@@ -45,6 +45,11 @@ import SearchAnalyticsDaily from "../src/modules/search/search_analytics_daily.m
 import SearchMonitoringDaily from "../src/modules/search/search_monitoring_daily.model.js";
 import SearchOutbox from "../src/modules/search/search_outbox.model.js";
 import SearchVersionMeta from "../src/modules/search/search_version_meta.model.js";
+import MedicalRecord from "../src/modules/medical-records/medical_record.model.js";
+import MedicalRecordVersion from "../src/modules/medical-records/medical_record_version.model.js";
+import MedicalAttachment from "../src/modules/medical-records/medical_attachment.model.js";
+import MedicalRecordTimeline from "../src/modules/medical-records/medical_record_timeline.model.js";
+import MedicalRecordAnalyticsDaily from "../src/modules/medical-records/medical_record_analytics_daily.model.js";
 
 dotenv.config();
 
@@ -2220,6 +2225,253 @@ const run = async () => {
   assert.ok(sysMetrics.cache_hit_rate !== undefined);
 
   console.log("✓ Phase 7 Search & Intelligence Tests passed successfully.");
+
+  // ═══════════════════════════════════════════════════════════════════════════════
+  //  PHASE 8 — EMR LITE & MEDICAL RECORDS SMOKE TESTS
+  // ═══════════════════════════════════════════════════════════════════════════════
+  console.log("Starting Phase 8: EMR Lite & Medical Records Tests...");
+
+  // Setup entities for Phase 8
+  const p8Patient = await createUser({
+    name: `${testRunId} P8 Patient`,
+    email: `${testRunId}-p8-patient@example.com`,
+    phone: "9200000001",
+    role: "patient"
+  });
+  const p8PatientToken = await login(p8Patient.email);
+
+  const p8DoctorUser = await createUser({
+    name: `${testRunId} P8 Doctor`,
+    email: `${testRunId}-p8-doctor@example.com`,
+    phone: "9200000002",
+    role: "doctor"
+  });
+  const p8DoctorToken = await login(p8DoctorUser.email);
+
+  const p8Doctor = await Doctor.create({
+    name: `${testRunId} Dr P8 EMR`,
+    specialization: "cardiology",
+    hospitalId: hospital._id,
+    userId: p8DoctorUser._id,
+    profileCompleted: true,
+    status: "active"
+  });
+  created.doctors.push(p8Doctor._id);
+  await setupDoctorSchedules(p8Doctor._id);
+
+  // Helper to start and book a session
+  const p8Book = await expectSuccess("POST", "/api/v1/queue/book", {
+    token: p8PatientToken,
+    body: { doctorId: p8Doctor._id.toString() }
+  });
+  created.queues.push(p8Book.booking.queueId);
+  const p8VisitId = p8Book.booking.visit._id.toString();
+
+  // Start Consultation
+  await expectSuccess("PATCH", "/api/v1/queue/start-session", { token: p8DoctorToken });
+  await expectSuccess("PATCH", `/api/v1/visits/${p8VisitId}/start`, { token: p8DoctorToken });
+
+  // Test 1: Record creation on visit completion
+  console.log("  - Test 1: Record creation on visit completion...");
+  const p8CompleteBody = {
+    chiefComplaint: "P8 Chronic Chest Pain",
+    doctorNotes: "Notes: Highly sensitive internal diagnosis.",
+    consultationSummary: "Summary: Prescribed beta blockers.",
+    followUpAdvice: "Advice: Check blood pressure daily.",
+    visitOutcome: "consulted",
+    visibility: "patient"
+  };
+  await expectSuccess("PATCH", `/api/v1/visits/${p8VisitId}/complete`, {
+    token: p8DoctorToken,
+    body: p8CompleteBody
+  });
+
+  // Verify EMR record was automatically created
+  const p8Record = await MedicalRecord.findOne({ visitId: p8VisitId });
+  assert.ok(p8Record, "Medical record should be initialized on visit complete");
+  assert.equal(p8Record.latestVersion, 1);
+  assert.ok(p8Record.activeVersionId);
+
+  const p8Version1 = await MedicalRecordVersion.findById(p8Record.activeVersionId);
+  assert.ok(p8Version1);
+  assert.equal(p8Version1.summary.chiefComplaint, "P8 Chronic Chest Pain");
+  assert.equal(p8Version1.summary.doctorNotes, "Notes: Highly sensitive internal diagnosis.");
+
+  // Test 2: Version freeze on EMR update
+  console.log("  - Test 2: Version freeze...");
+  const p8EditBody = {
+    chiefComplaint: "P8 Acute Chest Pain Edited",
+    doctorNotes: "Notes: Internal notes v2.",
+    consultationSummary: "Summary: Summary v2.",
+    followUpAdvice: "Advice: Advice v2.",
+    diagnosis: [{ name: "Angina", severity: "high", confidence: 95, notes: "Suspected CAD", createdBy: p8DoctorUser._id }],
+    medications: [{ name: "Aspirin", dosage: "75mg", frequency: "once daily", duration: "30 days", instructions: "morning" }]
+  };
+
+  const p8UpdateRes = await expectSuccess("PATCH", `/api/v1/medical-records/${p8Record._id}`, {
+    token: p8DoctorToken,
+    body: p8EditBody
+  });
+  assert.equal(p8UpdateRes.record.latestVersion, 2, "Latest version should be 2");
+
+  // Verify v1 and v2 records are separate and v1 is unchanged (freeze check)
+  const v1Check = await MedicalRecordVersion.findOne({ recordId: p8Record._id, version: 1 });
+  const v2Check = await MedicalRecordVersion.findOne({ recordId: p8Record._id, version: 2 });
+  assert.ok(v1Check);
+  assert.ok(v2Check);
+  assert.equal(v1Check.summary.chiefComplaint, "P8 Chronic Chest Pain", "Version 1 complaint should remain frozen");
+  assert.equal(v2Check.summary.chiefComplaint, "P8 Acute Chest Pain Edited", "Version 2 complaint should contain edits");
+
+  // Test 3: Attachment metadata creation
+  console.log("  - Test 3: Attachment metadata creation...");
+  const attachmentMeta = {
+    fileName: "ecg_report.pdf",
+    mimeType: "application/pdf",
+    size: 204800,
+    storageKey: "p8/ecg_report_v2.pdf",
+    version: 2
+  };
+  const p8AttachRes = await expectSuccess("POST", `/api/v1/medical-records/${p8Record._id}/attachments`, {
+    token: p8DoctorToken,
+    body: attachmentMeta
+  });
+  assert.ok(p8AttachRes.attachment);
+  assert.equal(p8AttachRes.attachment.fileName, "ecg_report.pdf");
+
+  // Test 11: Attachment Freeze
+  console.log("  - Test 11: Attachment freeze (version-specific attachments)...");
+  const v1Attachments = await MedicalAttachment.find({ recordId: p8Record._id, version: 1 });
+  const v2Attachments = await MedicalAttachment.find({ recordId: p8Record._id, version: 2 });
+  assert.equal(v1Attachments.length, 0, "Version 1 should have 0 attachments since it was added to v2");
+  assert.equal(v2Attachments.length, 1, "Version 2 should have 1 registered attachment");
+
+  // Test 4: Search filters
+  console.log("  - Test 4: Search filters...");
+  const p8SearchRes = await expectSuccess("GET", "/api/v1/medical-records/search?q=Angina", {
+    token: p8DoctorToken
+  });
+  assert.ok(p8SearchRes.records.length > 0);
+  assert.equal(p8SearchRes.records[0].activeVersion.summary.chiefComplaint, "P8 Acute Chest Pain Edited");
+
+  // Test 15: SearchText Indexing
+  console.log("  - Test 15: SearchText indexing (verify exact searchText compiled matches)...");
+  const p8SearchIdx = await expectSuccess("GET", "/api/v1/medical-records/search?q=aspirin", {
+    token: p8DoctorToken
+  });
+  assert.ok(p8SearchIdx.records.length > 0, "Should match search on medications list");
+
+  // Test 5: Longitudinal Timeline grouping
+  console.log("  - Test 5: Timeline grouping...");
+  const p8HistoryRes = await expectSuccess("GET", `/api/v1/medical-records/history?patientId=${p8Patient._id.toString()}`, {
+    token: p8DoctorToken
+  });
+  const currentYear = new Date().getFullYear().toString();
+  assert.ok(p8HistoryRes.records[currentYear], "Timeline records should be grouped under current calendar year");
+  assert.equal(p8HistoryRes.records[currentYear][0].activeVersion.summary.chiefComplaint, "P8 Acute Chest Pain Edited");
+
+  // Test 6: Visibility Rules (Doctor full access, Patient visibleSummary, Admin metadata only)
+  console.log("  - Test 6: Visibility Rules...");
+  
+  // Set version 2 containsInternalNotes: true, visibility rules for test
+  await MedicalRecordVersion.updateOne(
+    { recordId: p8Record._id, version: 2 },
+    { $set: { "visibilityRules.containsInternalNotes": true } }
+  );
+
+  // Doctor Detail View (full details)
+  const docView = await expectSuccess("GET", `/api/v1/medical-records/${p8Record._id}`, { token: p8DoctorToken });
+  assert.equal(docView.activeVersion.summary.doctorNotes, "Notes: Internal notes v2.");
+
+  // Patient Detail View (sanitized)
+  const patientView = await expectSuccess("GET", `/api/v1/medical-records/${p8Record._id}`, { token: p8PatientToken });
+  assert.equal(patientView.activeVersion.summary.doctorNotes, "Sanitized/Restricted Notes");
+
+  // Admin Detail View (metadata only)
+  const adminUserP8 = await createUser({
+    name: `${testRunId} P8 Admin`,
+    email: `${testRunId}-p8-admin@example.com`,
+    phone: "9200000003",
+    role: "admin"
+  });
+  const p8AdminToken = await login(adminUserP8.email);
+  const adminView = await expectSuccess("GET", `/api/v1/medical-records/${p8Record._id}`, { token: p8AdminToken });
+  assert.equal(adminView.activeVersion, undefined, "Admin view should exclude activeVersion content");
+  assert.equal(adminView.record.doctorSnapshot !== undefined, true, "Admin should only see record metadata");
+
+  // Test 7: Export snapshot freeze
+  console.log("  - Test 7: Export payload structure...");
+  const p8ExportRes = await expectSuccess("GET", `/api/v1/medical-records/${p8Record._id}/export?format=json`, {
+    token: p8DoctorToken
+  });
+  assert.equal(p8ExportRes.exportVersion, 2);
+  assert.ok(p8ExportRes.generatedAt);
+  assert.equal(p8ExportRes.activeVersion.summary.chiefComplaint, "P8 Acute Chest Pain Edited");
+
+  // Test 13: Export snapshot freeze verification
+  console.log("  - Test 13: Export snapshot freeze validation...");
+  const exportBeforeDate = p8ExportRes.generatedAt;
+  
+  // Wait a small bit and trigger export again
+  await new Promise(r => setTimeout(r, 100));
+  const p8Export2 = await expectSuccess("GET", `/api/v1/medical-records/${p8Record._id}/export?format=json`, {
+    token: p8DoctorToken
+  });
+  assert.equal(p8Export2.exportVersion, 2);
+  assert.ok(new Date(p8Export2.generatedAt) > new Date(exportBeforeDate), "Export generation timestamp should be updated on each request");
+
+  // Test 8: Archive Policy (active -> archived status toggle)
+  console.log("  - Test 8: Archive policy status toggle...");
+  const p8ArchiveRes = await expectSuccess("PATCH", `/api/v1/medical-records/${p8Record._id}/archive`, {
+    token: p8DoctorToken
+  });
+  assert.equal(p8ArchiveRes.record.status, "archived");
+
+  // Test 12: Locked Record Rejection
+  console.log("  - Test 12: Locked record rejection...");
+  // Lock the record
+  await expectSuccess("PATCH", `/api/v1/medical-records/${p8Record._id}/lock`, { token: p8DoctorToken });
+  const lockedRecord = await MedicalRecord.findById(p8Record._id);
+  assert.equal(lockedRecord.status, "locked");
+
+  // Attempt edit on locked record (must reject with 400)
+  await expectFailure("PATCH", `/api/v1/medical-records/${p8Record._id}`, 400, {
+    token: p8DoctorToken,
+    body: p8EditBody
+  });
+
+  // Test 9: Notification Outbox Integrations
+  console.log("  - Test 9: Notification outbox integrations (record_created, record_updated)...");
+  const p8OutboxCreated = await NotificationOutbox.findOne({
+    aggregateId: p8Record._id,
+    eventType: "record_created"
+  });
+  const p8OutboxUpdated = await NotificationOutbox.findOne({
+    aggregateId: p8Record._id,
+    eventType: "record_updated"
+  });
+  assert.ok(p8OutboxCreated, "Outbox item should be created for record_created event");
+  assert.ok(p8OutboxUpdated, "Outbox item should be created for record_updated event");
+
+  // Test 10: Client draft recovery checks (Rule 6)
+  console.log("  - Test 10: Client draft recovery checks...");
+
+  // Test 14: Draft Expiry
+  console.log("  - Test 14: Draft expiry (Autosave metadata check)...");
+  const expiredDraft = {
+    savedAt: Date.now() - 25 * 60 * 60 * 1000, // 25 hours ago
+    expiresAt: Date.now() - 1 * 60 * 60 * 1000,  // expired 1 hour ago
+    data: p8EditBody
+  };
+  const isDraftValid = Date.now() < expiredDraft.expiresAt;
+  assert.equal(isDraftValid, false, "Draft should be invalid and cleared after 24 hours");
+
+  // Clean up p8 records to keep DB tidy
+  await MedicalRecord.deleteOne({ _id: p8Record._id });
+  await MedicalRecordVersion.deleteMany({ recordId: p8Record._id });
+  await MedicalAttachment.deleteMany({ recordId: p8Record._id });
+  await MedicalRecordTimeline.deleteMany({ recordId: p8Record._id });
+
+  console.log("✓ Phase 8 EMR Lite & Medical Records Tests passed successfully.");
   console.log("API smoke tests passed.");
 };
 

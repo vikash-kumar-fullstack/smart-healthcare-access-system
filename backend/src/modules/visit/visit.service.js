@@ -10,6 +10,7 @@ import User from "../auth/auth.model.js";
 import AuditLog from "../queue/audit_log.model.js";
 import { createNotification } from "../notification/notification.service.js";
 import { incrementDailyAnalytics, getOrCreatePatientStats } from "../queue/queue.service.js";
+import { createFromVisit } from "../medical-records/medical_record.service.js";
 
 // ── Centralized Transitions Mapping ─────────────────────────────────────────
 export const transitions = {
@@ -237,6 +238,9 @@ export const completeConsultation = async (visitId, doctorUserId, summaryData, s
     version: 1,
     summaryStatus: "active"
   }], { session: dbSession });
+
+  // Create EMR snapshot and version 1 record (LOCK 2 & correction)
+  await createFromVisit(visit._id, summaryData, doctorUserId, dbSession);
   
   await appendTimelineEvent(visit._id, "VISIT_COMPLETED", "Consultation completed.", {}, dbSession);
   

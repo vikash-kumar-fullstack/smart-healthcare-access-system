@@ -11,6 +11,9 @@ import Notifications from "../pages/patient/Notifications";
 import DoctorLayout from "../layouts/DoctorLayout";
 import DoctorDashboard from "../pages/doctor/Dashboard";
 import Analytics from "../pages/doctor/Analytics";
+import MedicalRecords from "../pages/MedicalRecords";
+import RecordDetails from "../pages/RecordDetails";
+import MedicalTimeline from "../pages/MedicalTimeline";
 
 export default function AppRoutes() {
   return (
@@ -46,6 +49,18 @@ export default function AppRoutes() {
             path="notifications"
             element={<Notifications />}
           />
+          <Route
+            path="medical-records"
+            element={<MedicalRecords />}
+          />
+          <Route
+            path="medical-records/:id"
+            element={<RecordDetails />}
+          />
+          <Route
+            path="timeline"
+            element={<MedicalTimeline />}
+          />
           
         </Route>
         <Route
@@ -63,6 +78,18 @@ export default function AppRoutes() {
         <Route
           path="analytics"
           element={<Analytics />}
+        />
+        <Route
+          path="medical-records"
+          element={<MedicalRecords />}
+        />
+        <Route
+          path="medical-records/:id"
+          element={<RecordDetails />}
+        />
+        <Route
+          path="timeline"
+          element={<MedicalTimeline />}
         />
       </Route>
       </Routes>
