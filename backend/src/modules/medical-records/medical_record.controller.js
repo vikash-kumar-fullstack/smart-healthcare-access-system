@@ -25,7 +25,7 @@ export const createRecord = asyncHandler(async (req, res) => {
 
 export const updateRecord = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { chiefComplaint, doctorNotes, consultationSummary, followUpAdvice, diagnosis, medications, visibilityRules } = req.body;
+  const { chiefComplaint, doctorNotes, consultationSummary, followUpAdvice, diagnosis, medications, visibilityRules, expectedVersion } = req.body;
 
   if (!chiefComplaint || !doctorNotes || !consultationSummary) {
     return errorResponse(res, "Required clinical details are missing", 400);
@@ -40,7 +40,7 @@ export const updateRecord = asyncHandler(async (req, res) => {
       diagnosis,
       medications,
       visibilityRules
-    });
+    }, expectedVersion);
     return successResponse(res, { record }, "Medical record updated successfully");
   } catch (err) {
     const status = err.status || 500;
@@ -149,6 +149,23 @@ export const exportRecord = asyncHandler(async (req, res) => {
   try {
     const exportData = await recordService.exportRecord(id, req.user.role, req.user.userId, format);
     return successResponse(res, exportData, "Medical record export generated");
+  } catch (err) {
+    const status = err.status || 500;
+    return res.status(status).json({ success: false, message: err.message });
+  }
+});
+
+export const deleteAttachment = asyncHandler(async (req, res) => {
+  const { id, storageKey } = req.params;
+
+  try {
+    const attachment = await recordService.softDeleteAttachment(
+      id,
+      storageKey,
+      req.user.userId,
+      req.user.role
+    );
+    return successResponse(res, { attachment }, "Attachment soft-deleted successfully");
   } catch (err) {
     const status = err.status || 500;
     return res.status(status).json({ success: false, message: err.message });

@@ -11,6 +11,10 @@ const medicalRecordTimelineSchema = new mongoose.Schema({
     enum: ["CREATED", "UPDATED", "VIEWED", "SHARED", "ARCHIVED"],
     required: true
   },
+  sequenceNumber: {
+    type: Number,
+    required: true
+  },
   userId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",

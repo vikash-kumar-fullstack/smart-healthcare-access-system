@@ -50,6 +50,7 @@ import MedicalRecordVersion from "../src/modules/medical-records/medical_record_
 import MedicalAttachment from "../src/modules/medical-records/medical_attachment.model.js";
 import MedicalRecordTimeline from "../src/modules/medical-records/medical_record_timeline.model.js";
 import MedicalRecordAnalyticsDaily from "../src/modules/medical-records/medical_record_analytics_daily.model.js";
+import MedicalRecordExportLog from "../src/modules/medical-records/medical_record_export_log.model.js";
 
 dotenv.config();
 
@@ -2173,6 +2174,10 @@ const run = async () => {
   }
   assert.ok(processed, "Pending outbox events should be processed after worker starts");
 
+  // Stop workers to prevent race conditions during manual rollup test
+  stopSearchWorkers();
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
   // 19. Rollup clears buckets
   console.log("  - Test 19: Rollup clears buckets...");
   await SearchMonitoringDaily.deleteOne({ date: dateIST, scope: "global" });
@@ -2465,11 +2470,98 @@ const run = async () => {
   const isDraftValid = Date.now() < expiredDraft.expiresAt;
   assert.equal(isDraftValid, false, "Draft should be invalid and cleared after 24 hours");
 
+  // Restore status to active to allow edits for production check tests
+  await MedicalRecord.updateOne({ _id: p8Record._id }, { $set: { status: "active" } });
+
+  // Test 16: Concurrent Update Conflict (409)
+  console.log("  - Test 16: Concurrent Update Conflict (409)...");
+  await expectFailure("PATCH", `/api/v1/medical-records/${p8Record._id}`, 409, {
+    token: p8DoctorToken,
+    body: {
+      ...p8EditBody,
+      expectedVersion: 1
+    }
+  });
+
+  // Verify that sending correct expectedVersion (2) works and increments to 3
+  const p8UpdateRes3 = await expectSuccess("PATCH", `/api/v1/medical-records/${p8Record._id}`, {
+    token: p8DoctorToken,
+    body: {
+      ...p8EditBody,
+      expectedVersion: 2
+    }
+  });
+  assert.equal(p8UpdateRes3.record.latestVersion, 3, "Latest version should be 3");
+
+  // Test 17: Attachment Soft Delete & Retention
+  console.log("  - Test 17: Attachment Soft Delete & Retention...");
+  const newAttachMeta = {
+    fileName: "del_report.pdf",
+    mimeType: "application/pdf",
+    size: 1024,
+    storageKey: "p8/del_report.pdf",
+    version: 3
+  };
+  await expectSuccess("POST", `/api/v1/medical-records/${p8Record._id}/attachments`, {
+    token: p8DoctorToken,
+    body: newAttachMeta
+  });
+
+  // Soft delete it
+  await expectSuccess("DELETE", `/api/v1/medical-records/${p8Record._id}/attachments/p8%2Fdel_report.pdf`, {
+    token: p8DoctorToken
+  });
+
+  // Verify that it is filtered out of regular lookups
+  const detailAfterDelete = await expectSuccess("GET", `/api/v1/medical-records/${p8Record._id}`, { token: p8DoctorToken });
+  const hasDeleted = detailAfterDelete.attachments.some(att => att.storageKey === "p8/del_report.pdf");
+  assert.equal(hasDeleted, false, "Soft-deleted attachment should not be returned in record details");
+
+  // Verify that it still persists in the database with deletedAt and retentionUntil
+  const dbAttachment = await MedicalAttachment.findOne({ recordId: p8Record._id, storageKey: "p8/del_report.pdf" });
+  assert.ok(dbAttachment, "Attachment should still exist in DB");
+  assert.ok(dbAttachment.deletedAt, "deletedAt should be set");
+  assert.ok(dbAttachment.retentionUntil, "retentionUntil should be set");
+
+  // Test 18: Atomic Timeline Sequencing
+  console.log("  - Test 18: Atomic Timeline Sequencing...");
+  const timelineLogs = await MedicalRecordTimeline.find({ recordId: p8Record._id }).sort({ sequenceNumber: 1 });
+  assert.ok(timelineLogs.length >= 2, "Should have at least 2 timeline entries");
+  for (let i = 0; i < timelineLogs.length; i++) {
+    assert.equal(timelineLogs[i].sequenceNumber, i + 1, `Sequence number should be exactly ${i + 1}`);
+  }
+
+  // Test 19: Export Audit Trail
+  console.log("  - Test 19: Export Audit Trail...");
+  const logsCountBefore = await MedicalRecordExportLog.countDocuments({ recordId: p8Record._id });
+  
+  await expectSuccess("GET", `/api/v1/medical-records/${p8Record._id}/export?format=json`, {
+    token: p8DoctorToken
+  });
+
+  const logsCountAfter = await MedicalRecordExportLog.countDocuments({ recordId: p8Record._id });
+  assert.equal(logsCountAfter, logsCountBefore + 1, "Export log should be created on each export request");
+
+  const latestExportLog = await MedicalRecordExportLog.findOne({ recordId: p8Record._id }).sort({ createdAt: -1 });
+  assert.ok(latestExportLog);
+  assert.equal(latestExportLog.exportedBy.toString(), p8DoctorUser._id.toString());
+  assert.equal(latestExportLog.format, "json");
+  assert.equal(latestExportLog.version, 3);
+
+  // Test 20: Daily Analytics Expansion
+  console.log("  - Test 20: Daily Analytics Expansion...");
+  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const analytics = await MedicalRecordAnalyticsDaily.findOne({ date: todayStr });
+  assert.ok(analytics, "Analytics should exist for today");
+  assert.ok(analytics.versionsCreated > 0, "versionsCreated should be incremented");
+  assert.ok(analytics.exportsGenerated > 0, "exportsGenerated should be incremented");
+
   // Clean up p8 records to keep DB tidy
   await MedicalRecord.deleteOne({ _id: p8Record._id });
   await MedicalRecordVersion.deleteMany({ recordId: p8Record._id });
   await MedicalAttachment.deleteMany({ recordId: p8Record._id });
   await MedicalRecordTimeline.deleteMany({ recordId: p8Record._id });
+  await MedicalRecordExportLog.deleteMany({ recordId: p8Record._id });
 
   console.log("✓ Phase 8 EMR Lite & Medical Records Tests passed successfully.");
   console.log("API smoke tests passed.");

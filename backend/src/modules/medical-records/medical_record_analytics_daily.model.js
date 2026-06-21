@@ -13,6 +13,18 @@ const medicalRecordAnalyticsDailySchema = new mongoose.Schema({
   attachmentsUploaded: {
     type: Number,
     default: 0
+  },
+  versionsCreated: {
+    type: Number,
+    default: 0
+  },
+  exportsGenerated: {
+    type: Number,
+    default: 0
+  },
+  archiveCount: {
+    type: Number,
+    default: 0
   }
 }, { timestamps: true });
 

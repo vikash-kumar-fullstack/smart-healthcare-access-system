@@ -4,6 +4,7 @@ import MedicalRecordVersion from "./medical_record_version.model.js";
 import MedicalAttachment from "./medical_attachment.model.js";
 import MedicalRecordTimeline from "./medical_record_timeline.model.js";
 import MedicalRecordAnalyticsDaily from "./medical_record_analytics_daily.model.js";
+import MedicalRecordExportLog from "./medical_record_export_log.model.js";
 import Visit from "../visit/visit.model.js";
 import Doctor from "../doctor/doctor.model.js";
 import { createNotification } from "../notification/notification.service.js";
@@ -19,14 +20,29 @@ export const incrementAnalytics = async (dateStr, field) => {
   );
 };
 
-export const logTimeline = async (recordId, action, userId, userRole, details = {}) => {
-  await MedicalRecordTimeline.create({
+export const logTimeline = async (recordId, action, userId, userRole, details = {}, session = null) => {
+  const opts = session ? { session, new: true } : { new: true };
+  const record = await MedicalRecord.findByIdAndUpdate(
+    recordId,
+    { $inc: { timelineSequence: 1 } },
+    opts
+  );
+  if (!record) return;
+
+  const timelineObj = {
     recordId,
     action,
+    sequenceNumber: record.timelineSequence,
     userId,
     userRole,
     details
-  });
+  };
+
+  if (session) {
+    await MedicalRecordTimeline.create([timelineObj], { session });
+  } else {
+    await MedicalRecordTimeline.create(timelineObj);
+  }
 };
 
 const compileSearchText = (summary, diagnosis = [], medications = [], doctorSnapshot = {}) => {
@@ -52,7 +68,6 @@ export const createFromVisit = async (visitId, summaryData, doctorUserId, sessio
     throw Object.assign(new Error("Visit not found"), { status: 404 });
   }
 
-  // Idempotency: check if MedicalRecord already exists for this visit
   const existing = await MedicalRecord.findOne({ visitId }).session(dbSession);
   if (existing) {
     return existing;
@@ -72,7 +87,8 @@ export const createFromVisit = async (visitId, summaryData, doctorUserId, sessio
     doctorSnapshot,
     latestVersion: 1,
     activeVersionId: versionId,
-    status: "active"
+    status: "active",
+    timelineSequence: 0
   }], { session: dbSession });
 
   const createdRecord = record[0];
@@ -107,14 +123,8 @@ export const createFromVisit = async (visitId, summaryData, doctorUserId, sessio
     createdBy: doctorUserId
   }], { session: dbSession });
 
-  // Log timeline
-  await MedicalRecordTimeline.create([{
-    recordId: createdRecord._id,
-    action: "CREATED",
-    userId: doctorUserId,
-    userRole: "doctor",
-    details: { reason: "Created automatically from completed visit" }
-  }], { session: dbSession });
+  // Log timeline using atomic sequencing
+  await logTimeline(createdRecord._id, "CREATED", doctorUserId, "doctor", { reason: "Created automatically from completed visit" }, dbSession);
 
   // Update daily analytics
   const today = getTodayIST();
@@ -159,7 +169,8 @@ export const createManualRecord = async (doctorUserId, recordData) => {
     doctorSnapshot,
     latestVersion: 1,
     activeVersionId: versionId,
-    status: "active"
+    status: "active",
+    timelineSequence: 0
   });
 
   const summary = {
@@ -213,7 +224,7 @@ export const createManualRecord = async (doctorUserId, recordData) => {
   return record;
 };
 
-export const updateRecord = async (recordId, doctorUserId, updateData) => {
+export const updateRecord = async (recordId, doctorUserId, updateData, expectedVersion = null) => {
   const record = await MedicalRecord.findById(recordId);
   if (!record) {
     throw Object.assign(new Error("Medical record not found"), { status: 404 });
@@ -221,6 +232,11 @@ export const updateRecord = async (recordId, doctorUserId, updateData) => {
 
   if (record.status === "locked") {
     throw Object.assign(new Error("Record is locked and cannot be edited"), { status: 400 });
+  }
+
+  // Concurrency Check (Rule 1)
+  if (expectedVersion !== null && parseInt(expectedVersion) !== record.latestVersion) {
+    throw Object.assign(new Error("Conflict: EMR record has been modified by another practitioner"), { status: 409 });
   }
 
   const nextVersion = record.latestVersion + 1;
@@ -260,8 +276,8 @@ export const updateRecord = async (recordId, doctorUserId, updateData) => {
   record.activeVersionId = versionId;
   await record.save();
 
-  // Copy previous attachments to new version
-  const prevAttachments = await MedicalAttachment.find({ recordId, version: record.latestVersion - 1 });
+  // Copy active attachments to the new version (Rule 2)
+  const prevAttachments = await MedicalAttachment.find({ recordId, version: record.latestVersion - 1, deletedAt: null });
   if (prevAttachments.length > 0) {
     const clonedAttachments = prevAttachments.map(att => ({
       recordId,
@@ -277,6 +293,7 @@ export const updateRecord = async (recordId, doctorUserId, updateData) => {
   }
 
   await logTimeline(record._id, "UPDATED", doctorUserId, "doctor", { version: nextVersion });
+  await incrementAnalytics(getTodayIST(), "versionsCreated");
 
   // Trigger notification outbox
   await createNotification(
@@ -323,7 +340,7 @@ export const getRecordDetail = async (recordId, userRole, userId) => {
     }
   }
 
-  // Get all versions list (for timeline/history dropdown in frontend)
+  // Get all versions list
   let versions = [];
   if (userRole === "doctor") {
     versions = await MedicalRecordVersion.find({ recordId }).sort({ version: -1 }).lean();
@@ -340,8 +357,8 @@ export const getRecordDetail = async (recordId, userRole, userId) => {
     });
   }
 
-  // Fetch attachments for active version
-  const attachments = await MedicalAttachment.find({ recordId, version: record.latestVersion });
+  // Fetch attachments for active version (Filter out soft-deleted attachments)
+  const attachments = await MedicalAttachment.find({ recordId, version: record.latestVersion, deletedAt: null });
 
   // Admin access (Metadata only)
   if (userRole === "admin") {
@@ -407,7 +424,6 @@ export const getPatientHistory = async (patientId, userRole, userId, limit = 10,
     nextCursor = Buffer.from(`${lastItem.createdAt.toISOString()}_${lastItem._id}`).toString("base64");
   }
 
-  // Populate active version for each record (and sanitize for patient)
   const populatedRecords = [];
   for (const rec of records) {
     const activeVersion = await MedicalRecordVersion.findById(rec.activeVersionId).lean();
@@ -457,14 +473,12 @@ export const searchRecords = async (userRole, userId, queryParams) => {
 
   const matchQuery = { status: { $ne: "deleted" } };
 
-  // Patient filters
   if (userRole === "patient") {
     matchQuery.patientId = new mongoose.Types.ObjectId(userId);
   } else if (queryParams.patientId) {
     matchQuery.patientId = new mongoose.Types.ObjectId(queryParams.patientId);
   }
 
-  // Date filter
   if (queryParams.date) {
     const start = new Date(queryParams.date);
     start.setHours(0, 0, 0, 0);
@@ -473,27 +487,22 @@ export const searchRecords = async (userRole, userId, queryParams) => {
     matchQuery.createdAt = { $gte: start, $lte: end };
   }
 
-  // Outcome filter
   if (queryParams.outcome) {
     const outcomeVisits = await Visit.find({ visitOutcome: queryParams.outcome }).select("_id");
     const visitIds = outcomeVisits.map(v => v._id);
     matchQuery.visitId = { $in: visitIds };
   }
 
-  // Doctor search
   if (queryParams.doctor) {
     matchQuery["doctorSnapshot.name"] = new RegExp(queryParams.doctor, "i");
   }
 
-  // Fetch record matches
   const records = await MedicalRecord.find(matchQuery).sort({ createdAt: -1 });
 
-  // Extract active versions
   const activeVersionIds = records.map(r => r.activeVersionId);
 
   const versionQuery = { _id: { $in: activeVersionIds } };
 
-  // SearchText / diagnosis / keyword filter
   if (queryParams.q) {
     versionQuery.$text = { $search: queryParams.q };
   }
@@ -522,7 +531,6 @@ export const searchRecords = async (userRole, userId, queryParams) => {
     }
   }
 
-  // Cursor Pagination
   let sliced = [];
   let nextCursor = null;
   let hasMore = false;
@@ -566,8 +574,7 @@ export const addAttachment = async (recordId, version, storageKey, mimeType, siz
     throw Object.assign(new Error("Record is locked and attachments cannot be added"), { status: 400 });
   }
 
-  // Ensure unique recordId + version + storageKey
-  const existing = await MedicalAttachment.findOne({ recordId, version, storageKey });
+  const existing = await MedicalAttachment.findOne({ recordId, version, storageKey, deletedAt: null });
   if (existing) {
     return existing;
   }
@@ -594,6 +601,31 @@ export const addAttachment = async (recordId, version, storageKey, mimeType, siz
   return attachment;
 };
 
+// Soft Delete Attachment (Rule 2)
+export const softDeleteAttachment = async (recordId, storageKey, userId, userRole) => {
+  const record = await MedicalRecord.findById(recordId);
+  if (!record) {
+    throw Object.assign(new Error("Medical record not found"), { status: 404 });
+  }
+
+  if (record.status === "locked") {
+    throw Object.assign(new Error("Record is locked and attachments cannot be modified"), { status: 400 });
+  }
+
+  const attachment = await MedicalAttachment.findOne({ recordId, version: record.latestVersion, storageKey, deletedAt: null });
+  if (!attachment) {
+    throw Object.assign(new Error("Attachment not found"), { status: 404 });
+  }
+
+  attachment.deletedAt = new Date();
+  attachment.retentionUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days retention policy
+  await attachment.save();
+
+  await logTimeline(recordId, "UPDATED", userId, userRole, { action: "ATTACHMENT_SOFT_DELETED", file: attachment.fileName });
+
+  return attachment;
+};
+
 export const archiveRecord = async (recordId, userId, userRole) => {
   const record = await MedicalRecord.findById(recordId);
   if (!record) {
@@ -608,6 +640,7 @@ export const archiveRecord = async (recordId, userId, userRole) => {
   await record.save();
 
   await logTimeline(recordId, "ARCHIVED", userId, userRole);
+  await incrementAnalytics(getTodayIST(), "archiveCount");
 
   return record;
 };
@@ -645,6 +678,15 @@ export const exportRecord = async (recordId, userRole, userId, format = "json") 
   const details = await getRecordDetail(recordId, userRole, userId);
   
   if (userRole === "admin") {
+    // Log audit trail (Rule 4)
+    await MedicalRecordExportLog.create({
+      recordId,
+      exportedBy: userId,
+      format,
+      version: details.record.latestVersion
+    });
+    await incrementAnalytics(getTodayIST(), "exportsGenerated");
+
     return {
       exportVersion: details.record.latestVersion,
       generatedAt: new Date().toISOString(),
@@ -659,6 +701,15 @@ export const exportRecord = async (recordId, userRole, userId, format = "json") 
     activeVersion: details.activeVersion,
     attachments: details.attachments
   };
+
+  // Log audit trail (Rule 4)
+  await MedicalRecordExportLog.create({
+    recordId,
+    exportedBy: userId,
+    format,
+    version: details.record.latestVersion
+  });
+  await incrementAnalytics(getTodayIST(), "exportsGenerated");
 
   if (format === "pdf_ready") {
     const printableHtml = `

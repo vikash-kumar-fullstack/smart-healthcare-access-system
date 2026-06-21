@@ -30,6 +30,10 @@ const medicalRecordSchema = new mongoose.Schema({
     enum: ["active", "locked", "archived", "deleted"],
     default: "active"
   },
+  timelineSequence: {
+    type: Number,
+    default: 0
+  },
   deletedAt: {
     type: Date,
     default: null
