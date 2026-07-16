@@ -25,6 +25,7 @@ import analyticsRoutes from "./modules/analytics/analytics.routes.js";
 import familyRoutes from "./modules/user/family.routes.js";
 
 const app = express();
+app.set("trust proxy", 1);
 
 const isProd = process.env.NODE_ENV === "production";
 

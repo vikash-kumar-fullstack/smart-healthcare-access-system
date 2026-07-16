@@ -266,7 +266,7 @@ export default function DoctorDashboard() {
   }, []);
 
   useEffect(() => {
-    if (profile && profile.profileCompleted && profile.status === "active") {
+    if (profile && profile.profileCompleted && ["active", "verified", "approved"].includes(profile.status)) {
       fetchQueue();
       const interval = setInterval(fetchQueue, 15000);
       return () => clearInterval(interval);
@@ -649,8 +649,8 @@ export default function DoctorDashboard() {
     );
   }
 
-  // 5. Inactive or Suspended Notice (status !== "active")
-  if (profile && profile.status !== "active") {
+  // 5. Inactive or Suspended Notice (status !== "active" && status !== "verified" && status !== "approved")
+  if (profile && !["active", "verified", "approved"].includes(profile.status)) {
     return (
       <div className="max-w-md mx-auto my-16 px-4">
         <div className="bg-white rounded-2xl shadow-sm border border-red-100 p-8 text-center space-y-4">

@@ -80,7 +80,7 @@ export default function Profile() {
         if (u.role === "doctor") {
           const docRes = await api.get("/doctors/profile").catch(() => null);
           if (docRes?.data?.success) {
-            setDoctorProfile(docRes.data.data);
+            setDoctorProfile(docRes.data.data.doctor || docRes.data.data);
           }
         }
       }
@@ -203,7 +203,7 @@ export default function Profile() {
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Member Since</span>
                 <span className="text-sm font-semibold text-slate-700 mt-1 flex items-center gap-2">
                   <Calendar className="h-4 w-4 text-slate-400" />
-                  {new Date(user.createdAt).toLocaleDateString([], { year: "numeric", month: "long", day: "numeric" })}
+                  {user.createdAt ? new Date(user.createdAt).toLocaleDateString([], { year: "numeric", month: "long", day: "numeric" }) : "N/A"}
                 </span>
               </div>
             </div>
