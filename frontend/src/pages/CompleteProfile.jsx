@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import toast from "react-hot-toast";
@@ -23,6 +23,20 @@ export default function CompleteProfile() {
     weight: ""
   });
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const root = window.document.documentElement;
+    const previousTheme = root.getAttribute("data-theme");
+    // Force light theme for profile completion page
+    root.setAttribute("data-theme", "light");
+    return () => {
+      if (previousTheme) {
+        root.setAttribute("data-theme", previousTheme);
+      } else {
+        root.removeAttribute("data-theme");
+      }
+    };
+  }, []);
 
   const handleChange = (e) => {
     setForm(prev => ({
