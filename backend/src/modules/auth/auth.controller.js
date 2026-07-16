@@ -12,6 +12,7 @@ import {
   generateTokens
 } from "./auth.service.js";
 import User from "./auth.model.js";
+import Doctor from "../doctor/doctor.model.js";
 import crypto from "crypto";
 import mongoose from "mongoose";
 import { verifySocialProvider } from "./oauth.service.js";
