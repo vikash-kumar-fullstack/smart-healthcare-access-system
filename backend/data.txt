@@ -1,0 +1,68 @@
+================================================================================
+                         MEDIHOSPI LOGIN CREDENTIALS
+================================================================================
+
+All accounts in the development database share the same default password:
+--------------------------------------------------------------------------------
+PASSWORD: Password123!
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+1. DISTRICT ADMINISTRATOR (System Admin)
+--------------------------------------------------------------------------------
+Email:    admin@example.com
+Role:     admin (District Admin Delhi)
+
+--------------------------------------------------------------------------------
+2. HOSPITAL ADMINISTRATOR
+--------------------------------------------------------------------------------
+Email:    hospital@example.com (Showcase Hospital Admin AIIMS Delhi)
+Role:     hospital_admin
+
+Other Hospital Administrators:
+- hospital1@smarthealth.com (Apollo Delhi Admin)
+- hospital2@smarthealth.com (Fortis Delhi Admin)
+- hospital3@smarthealth.com (Max Saket Delhi Admin)
+- hospital4@smarthealth.com (Safdarjung Delhi Admin)
+...up to hospital9@smarthealth.com
+
+--------------------------------------------------------------------------------
+3. DOCTORS
+--------------------------------------------------------------------------------
+Email:    doctor@example.com (Dr. Alok Sen - Cardiology)
+Role:     doctor
+
+Other Doctor Accounts (Total 50):
+- doctor1@smarthealth.com (Neurology)
+- doctor2@smarthealth.com (Orthopedics)
+- doctor3@smarthealth.com (ENT)
+- doctor4@smarthealth.com (Dermatology)
+- doctor5@smarthealth.com (Pediatrics)
+- doctor6@smarthealth.com (General Medicine)
+...up to doctor49@smarthealth.com
+
+--------------------------------------------------------------------------------
+4. RECEPTIONISTS (2 per Hospital, Total 20)
+--------------------------------------------------------------------------------
+Email:    receptionist0@smarthealth.com (AIIMS Delhi Morning Receptionist)
+Email:    receptionist1@smarthealth.com (AIIMS Delhi Evening Receptionist)
+Email:    receptionist2@smarthealth.com (Apollo Delhi Morning Receptionist)
+Role:     receptionist
+
+Other Receptionist Accounts:
+- receptionist3@smarthealth.com
+...up to receptionist19@smarthealth.com
+
+--------------------------------------------------------------------------------
+5. PATIENTS (Total 500)
+--------------------------------------------------------------------------------
+Email:    patient@example.com (Rajesh Kumar - Primary Patient)
+Role:     patient
+
+Other Patient Accounts:
+- patient1@smarthealth.com
+- patient2@smarthealth.com
+- patient3@smarthealth.com
+...up to patient499@smarthealth.com
+
+================================================================================

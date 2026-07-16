@@ -69,15 +69,16 @@ export default function CompleteProfile() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-88px)] flex items-center justify-center bg-[#F8FAFC] px-4 py-12 relative overflow-hidden">
-      <div className="absolute top-10 left-10 w-96 h-96 bg-[#14B8A6]/5 rounded-full blur-3xl pointer-events-none" />
-      <div className="absolute bottom-10 right-10 w-96 h-96 bg-[#0E7490]/5 rounded-full blur-3xl pointer-events-none" />
+    <div className="h-[calc(100vh-88px)] w-full flex items-center justify-center bg-[#F8FAFC] px-4 py-12 relative overflow-hidden">
+      {/* Ambient background blobs */}
+      <div className="absolute top-10 left-10 w-96 h-96 bg-teal-500/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute bottom-10 right-10 w-96 h-96 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none" />
 
-      <div className="w-full max-w-xl bg-white rounded-3xl border border-slate-200/60 shadow-[0_15px_40px_rgba(0,0,0,0.06)] overflow-hidden p-8 md:p-12 z-10 text-left">
+      <div className="w-full max-w-2xl bg-white rounded-3xl border border-slate-200/80 shadow-[0_15px_40px_rgba(0,0,0,0.06)] p-8 md:p-12 z-10 text-left my-4 max-h-[90vh] flex flex-col">
         
         {/* Brand Header */}
-        <div className="flex items-center gap-3 bg-slate-50 px-4 py-2.5 rounded-2xl border border-slate-100 shadow-sm w-fit shrink-0 mb-8">
-          <div className="bg-white p-1 rounded-lg border border-slate-150 shadow-sm shrink-0">
+        <div className="flex items-center gap-3 bg-slate-50 px-4 py-2.5 rounded-2xl border border-slate-100 shadow-sm w-fit shrink-0 mb-6">
+          <div className="bg-white p-1 rounded-lg border border-slate-200 shadow-sm shrink-0">
             <img src={logoImg} alt="MediHospi Logo" className="w-6 h-6 object-contain rounded" />
           </div>
           <div className="flex flex-col text-left">
@@ -91,27 +92,27 @@ export default function CompleteProfile() {
           </div>
         </div>
 
-        <div className="mb-6">
-          <h2 className="text-2xl font-black text-slate-800 tracking-tight">Complete Your Profile</h2>
-          <p className="text-xs text-slate-500 mt-1">Please provide the remaining details to access care booking sessions.</p>
+        <div className="mb-6 shrink-0">
+          <h2 className="text-3xl font-black text-slate-800 tracking-tight">Complete Your Profile</h2>
+          <p className="text-sm text-slate-500 mt-1.5">Please provide the remaining details to access care booking sessions.</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5 max-h-[70vh] overflow-y-auto pr-2">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-6 overflow-y-auto pr-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-slate-350 dark:[&::-webkit-scrollbar-thumb]:bg-slate-700 dark:hover:[&::-webkit-scrollbar-thumb]:bg-slate-600">
           
           {/* Section 1: Demographics & Address (Required) */}
-          <div className="border border-slate-150 rounded-2xl p-4 flex flex-col gap-3">
-            <h3 className="text-xs font-extrabold text-[#0E7490] tracking-wider uppercase border-b pb-2 mb-1">
+          <div className="border border-slate-200 rounded-2xl p-5 flex flex-col gap-4">
+            <h3 className="text-sm font-extrabold text-teal-600 tracking-wider uppercase border-b border-slate-200 pb-2 mb-1">
               1. Demographics & Contact
             </h3>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Phone */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
                   Mobile Phone *
                 </label>
                 <div className="relative flex items-center">
-                  <Phone className="absolute left-3.5 h-4 w-4 text-slate-400" />
+                  <Phone className="absolute left-3.5 h-4.5 w-4.5 text-slate-400" />
                   <input
                     type="tel"
                     name="phone"
@@ -119,42 +120,42 @@ export default function CompleteProfile() {
                     value={form.phone}
                     onChange={handleChange}
                     maxLength="10"
-                    className="h-10 w-full pl-10 pr-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 outline-none transition focus:border-[#0E7490]"
+                    className="h-12 w-full pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10"
                     required
                   />
                 </div>
               </div>
 
               {/* DOB */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
                   Date of Birth *
                 </label>
                 <div className="relative flex items-center">
-                  <Calendar className="absolute left-3.5 h-4 w-4 text-slate-400" />
+                  <Calendar className="absolute left-3.5 h-4.5 w-4.5 text-slate-400" />
                   <input
                     type="date"
                     name="dob"
                     value={form.dob}
                     onChange={handleChange}
-                    className="h-10 w-full pl-10 pr-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 outline-none transition focus:border-[#0E7490]"
+                    className="h-12 w-full pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10"
                     required
                   />
                 </div>
               </div>
 
               {/* Gender */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
                   Gender *
                 </label>
                 <div className="relative flex items-center">
-                  <User className="absolute left-3.5 h-4 w-4 text-slate-400" />
+                  <User className="absolute left-3.5 h-4.5 w-4.5 text-slate-400" />
                   <select
                     name="gender"
                     value={form.gender}
                     onChange={handleChange}
-                    className="h-10 w-full pl-10 pr-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 outline-none transition focus:border-[#0E7490]"
+                    className="h-12 w-full pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10"
                     required
                   >
                     <option value="male">Male</option>
@@ -166,19 +167,19 @@ export default function CompleteProfile() {
             </div>
 
             {/* Address */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
                 Full Residential Address *
               </label>
               <div className="relative flex items-center">
-                <MapPin className="absolute left-3.5 h-4 w-4 text-slate-400" />
+                <MapPin className="absolute left-3.5 h-4.5 w-4.5 text-slate-400" />
                 <input
                   type="text"
                   name="address"
                   placeholder="Street, Landmark, City, State"
                   value={form.address}
                   onChange={handleChange}
-                  className="h-10 w-full pl-10 pr-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 outline-none transition focus:border-[#0E7490]"
+                  className="h-12 w-full pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10"
                   required
                 />
               </div>
@@ -186,38 +187,38 @@ export default function CompleteProfile() {
           </div>
 
           {/* Section 2: Emergency Contact (Required) */}
-          <div className="border border-slate-150 rounded-2xl p-4 flex flex-col gap-3">
-            <h3 className="text-xs font-extrabold text-[#0E7490] tracking-wider uppercase border-b pb-2 mb-1">
+          <div className="border border-slate-200 rounded-2xl p-5 flex flex-col gap-4">
+            <h3 className="text-sm font-extrabold text-teal-600 tracking-wider uppercase border-b border-slate-200 pb-2 mb-1">
               2. Emergency Contact
             </h3>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Contact Name */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
                   Contact Person Name *
                 </label>
                 <div className="relative flex items-center">
-                  <User className="absolute left-3.5 h-4 w-4 text-slate-400" />
+                  <User className="absolute left-3.5 h-4.5 w-4.5 text-slate-400" />
                   <input
                     type="text"
                     name="emergencyContactName"
                     placeholder="e.g. Jane Doe"
                     value={form.emergencyContactName}
                     onChange={handleChange}
-                    className="h-10 w-full pl-10 pr-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 outline-none transition focus:border-[#0E7490]"
+                    className="h-12 w-full pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10"
                     required
                   />
                 </div>
               </div>
 
               {/* Contact Phone */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
                   Contact Phone Number *
                 </label>
                 <div className="relative flex items-center">
-                  <Phone className="absolute left-3.5 h-4 w-4 text-slate-400" />
+                  <Phone className="absolute left-3.5 h-4.5 w-4.5 text-slate-400" />
                   <input
                     type="tel"
                     name="emergencyContactNumber"
@@ -225,7 +226,7 @@ export default function CompleteProfile() {
                     value={form.emergencyContactNumber}
                     onChange={handleChange}
                     maxLength="10"
-                    className="h-10 w-full pl-10 pr-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 outline-none transition focus:border-[#0E7490]"
+                    className="h-12 w-full pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10"
                     required
                   />
                 </div>
@@ -234,24 +235,24 @@ export default function CompleteProfile() {
           </div>
 
           {/* Section 3: Essential Medical Details (Required/Optional) */}
-          <div className="border border-slate-150 rounded-2xl p-4 flex flex-col gap-3">
-            <h3 className="text-xs font-extrabold text-[#0E7490] tracking-wider uppercase border-b pb-2 mb-1">
+          <div className="border border-slate-200 rounded-2xl p-5 flex flex-col gap-4">
+            <h3 className="text-sm font-extrabold text-teal-600 tracking-wider uppercase border-b border-slate-200 pb-2 mb-1">
               3. Vital Statistics & Medical Data
             </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Blood Group */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
                   Blood Group *
                 </label>
                 <div className="relative flex items-center">
-                  <Heart className="absolute left-3.5 h-4 w-4 text-red-500" />
+                  <Heart className="absolute left-3.5 h-4.5 w-4.5 text-red-500" />
                   <select
                     name="bloodGroup"
                     value={form.bloodGroup}
                     onChange={handleChange}
-                    className="h-10 w-full pl-10 pr-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 outline-none transition focus:border-[#0E7490]"
+                    className="h-12 w-full pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10"
                     required
                   >
                     {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map(bg => (
@@ -262,92 +263,92 @@ export default function CompleteProfile() {
               </div>
 
               {/* Height */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
                   Height (cm)
                 </label>
                 <div className="relative flex items-center">
-                  <Activity className="absolute left-3.5 h-4 w-4 text-slate-400" />
+                  <Activity className="absolute left-3.5 h-4.5 w-4.5 text-slate-400" />
                   <input
                     type="number"
                     name="height"
                     placeholder="e.g. 175"
                     value={form.height}
                     onChange={handleChange}
-                    className="h-10 w-full pl-10 pr-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 outline-none transition focus:border-[#0E7490]"
+                    className="h-12 w-full pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10"
                   />
                 </div>
               </div>
 
               {/* Weight */}
-              <div className="flex flex-col gap-1">
-                <label className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
                   Weight (kg)
                 </label>
                 <div className="relative flex items-center">
-                  <Activity className="absolute left-3.5 h-4 w-4 text-slate-400" />
+                  <Activity className="absolute left-3.5 h-4.5 w-4.5 text-slate-400" />
                   <input
                     type="number"
                     name="weight"
                     placeholder="e.g. 70"
                     value={form.weight}
                     onChange={handleChange}
-                    className="h-10 w-full pl-10 pr-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 outline-none transition focus:border-[#0E7490]"
+                    className="h-12 w-full pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10"
                   />
                 </div>
               </div>
             </div>
 
             {/* Allergies */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
                 Allergies (Optional)
               </label>
               <div className="relative flex items-center">
-                <ShieldAlert className="absolute left-3.5 h-4 w-4 text-amber-500" />
+                <ShieldAlert className="absolute left-3.5 h-4.5 w-4.5 text-amber-500" />
                 <input
                   type="text"
                   name="allergies"
                   placeholder="e.g. Penicillin, Peanuts (comma separated)"
                   value={form.allergies}
                   onChange={handleChange}
-                  className="h-10 w-full pl-10 pr-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 outline-none transition focus:border-[#0E7490]"
+                  className="h-12 w-full pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10"
                 />
               </div>
             </div>
 
             {/* Medications */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
                 Current Medications (Optional)
               </label>
               <div className="relative flex items-center">
-                <FileText className="absolute left-3.5 h-4 w-4 text-slate-400" />
+                <FileText className="absolute left-3.5 h-4.5 w-4.5 text-slate-400" />
                 <input
                   type="text"
                   name="currentMedications"
                   placeholder="e.g. Metformin, Aspirin (comma separated)"
                   value={form.currentMedications}
                   onChange={handleChange}
-                  className="h-10 w-full pl-10 pr-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 outline-none transition focus:border-[#0E7490]"
+                  className="h-12 w-full pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10"
                 />
               </div>
             </div>
 
             {/* Chronic Conditions */}
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] uppercase font-bold text-slate-450 tracking-wider">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">
                 Chronic Conditions / Diseases (Optional)
               </label>
               <div className="relative flex items-center">
-                <ShieldAlert className="absolute left-3.5 h-4 w-4 text-rose-500" />
+                <ShieldAlert className="absolute left-3.5 h-4.5 w-4.5 text-rose-500" />
                 <input
                   type="text"
                   name="chronicDiseases"
                   placeholder="e.g. Diabetes, Hypertension (comma separated)"
                   value={form.chronicDiseases}
                   onChange={handleChange}
-                  className="h-10 w-full pl-10 pr-3 rounded-xl border border-slate-200 bg-white text-xs text-slate-800 outline-none transition focus:border-[#0E7490]"
+                  className="h-12 w-full pl-11 pr-4 rounded-xl border border-slate-200 bg-white text-sm text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/10"
                 />
               </div>
             </div>
@@ -356,7 +357,7 @@ export default function CompleteProfile() {
           <Button
             type="submit"
             disabled={loading}
-            className="w-full h-11 bg-[#0E7490] hover:bg-[#0c5f76] text-white font-bold rounded-xl text-xs flex items-center justify-center gap-2 shadow-md transition-all shrink-0 cursor-pointer border-none"
+            className="w-full h-12 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-md shadow-teal-500/10 transition-all shrink-0 cursor-pointer border-none"
           >
             {loading ? "Finalizing..." : "COMPLETE PROFILE"}
             {!loading && <ArrowRight className="h-4.5 w-4.5" />}
