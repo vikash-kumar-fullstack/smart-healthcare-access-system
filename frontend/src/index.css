@@ -269,3 +269,34 @@ button.btn, button.btn-lg, .px-4.py-2 {
   font-weight: 600 !important;
   line-height: 1 !important;
 }
+
+/* Force light theme variables and reset colors when light theme is active */
+[data-theme="light"] {
+  --color-light: #f8fafc !important;
+  --color-dark: #0f172a !important;
+  --color-surface: #ffffff !important;
+  --color-border: #e2e8f0 !important;
+  --color-muted: #64748b !important;
+  color-scheme: light !important;
+}
+
+[data-theme="light"] .text-slate-800 {
+  color: #1e293b !important;
+}
+
+[data-theme="light"] .text-slate-500 {
+  color: #64748b !important;
+}
+
+[data-theme="light"] input,
+[data-theme="light"] select,
+[data-theme="light"] textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] input::placeholder,
+[data-theme="light"] textarea::placeholder {
+  color: #94a3b8 !important;
+}
