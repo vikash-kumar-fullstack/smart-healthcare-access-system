@@ -13,6 +13,7 @@ const parseCookies = (cookieHeader) => {
 const authMiddleware = (req, res, next) => {
   let token = null;
 
+  // Extract token from Authorization header or fallback to HttpOnly cookies (accessToken)
   if (req.headers.authorization && req.headers.authorization.startsWith("Bearer ")) {
     token = req.headers.authorization.split(" ")[1];
   } else {

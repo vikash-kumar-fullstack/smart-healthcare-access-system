@@ -103,7 +103,17 @@ export const login = asyncHandler(async (req, res) => {
 
 
 export const refresh = asyncHandler(async (req, res) => {
-  const { refreshToken } = req.body;
+  const parseCookies = (cookieHeader) => {
+    const list = {};
+    if (!cookieHeader) return list;
+    cookieHeader.split(";").forEach(cookie => {
+      let parts = cookie.split("=");
+      list[parts.shift().trim()] = decodeURIComponent(parts.join("="));
+    });
+    return list;
+  };
+  const cookies = parseCookies(req.headers.cookie);
+  const refreshToken = req.body.refreshToken || cookies.refreshToken;
 
   if (!refreshToken) {
     return res.status(400).json({
@@ -114,6 +124,24 @@ export const refresh = asyncHandler(async (req, res) => {
 
   try {
     const tokens = await refreshUserToken(refreshToken, req);
+    const isProd = process.env.NODE_ENV === "production";
+
+    res.cookie("accessToken", tokens.token, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
+      maxAge: 15 * 60 * 1000,
+      path: "/"
+    });
+
+    res.cookie("refreshToken", tokens.refreshToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      path: "/"
+    });
+
     return successResponse(res, tokens, "Token refreshed successfully");
   } catch (err) {
     return res.status(401).json({
@@ -125,7 +153,29 @@ export const refresh = asyncHandler(async (req, res) => {
 
 
 export const logout = asyncHandler(async (req, res) => {
+  const isProd = process.env.NODE_ENV === "production";
   await logoutUser(req.user.userId);
+
+  res.clearCookie("accessToken", {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    path: "/"
+  });
+
+  res.clearCookie("refreshToken", {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    path: "/"
+  });
+
+  res.clearCookie("role", {
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    path: "/"
+  });
+
   return successResponse(res, null, "Logged out successfully");
 });
 
