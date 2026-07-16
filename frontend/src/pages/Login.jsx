@@ -10,6 +10,15 @@ import { recordEvent } from "../utils/experienceMetrics";
 export default function Login() {
   const navigate = useNavigate();
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const errorParam = params.get("error");
+    if (errorParam) {
+      toast.error(decodeURIComponent(errorParam));
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
+
   const [form, setForm] = useState({
     email: "",
     password: ""

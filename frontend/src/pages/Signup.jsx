@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import api from "../services/api";
 import toast from "react-hot-toast";
@@ -8,6 +8,15 @@ import logoImg from "../assets/logo.png";
 import { getDashboardPath } from "../utils/auth";
 export default function Signup() {
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const errorParam = params.get("error");
+    if (errorParam) {
+      toast.error(decodeURIComponent(errorParam));
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   const [form, setForm] = useState({
     name: "",
