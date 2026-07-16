@@ -286,10 +286,11 @@ export const revokeAllSessions = asyncHandler(async (req, res) => {
 export const initiateGoogleAuth = (role) => {
   return (req, res) => {
     const randomState = crypto.randomBytes(16).toString("hex");
+    const action = req.query.action === "signup" ? "signup" : "login";
     
     // Set a cookie with the state (10 mins expiry)
     const isProd = process.env.NODE_ENV === "production";
-    const cookieData = JSON.stringify({ csrf: randomState, role });
+    const cookieData = JSON.stringify({ csrf: randomState, role, action });
 
     res.cookie("oauth_state", cookieData, {
       httpOnly: true,
@@ -302,12 +303,12 @@ export const initiateGoogleAuth = (role) => {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const redirectUri = process.env.GOOGLE_CALLBACK_URL || "http://localhost:5000/api/v1/auth/google/callback";
 
-    // Base64 encode the state payload (csrf + role)
-    const statePayload = Buffer.from(JSON.stringify({ csrf: randomState, role })).toString("base64");
+    // Base64 encode the state payload (csrf + role + action)
+    const statePayload = Buffer.from(JSON.stringify({ csrf: randomState, role, action })).toString("base64");
 
     // If client ID is not configured (offline demo mode), simulate immediate callback redirect
     if (!clientId) {
-      const isSignup = req.query.signup === "true";
+      const isSignup = req.query.signup === "true" || action === "signup";
       let mockEmail = "patient@example.com";
       if (isSignup && role === "patient") {
         mockEmail = `new-patient-${crypto.randomBytes(4).toString("hex")}@example.com`;
@@ -385,10 +386,10 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
     return clearStateCookieAndRedirect("Invalid state parameter format.");
   }
 
-  const { csrf: storedCsrf, role: storedRole } = cookieState;
-  const { csrf: incomingCsrf, role: incomingRole } = decodedState;
+  const { csrf: storedCsrf, role: storedRole, action: storedAction = "login" } = cookieState;
+  const { csrf: incomingCsrf, role: incomingRole, action: incomingAction = "login" } = decodedState;
 
-  if (!storedCsrf || storedCsrf !== incomingCsrf || storedRole !== incomingRole) {
+  if (!storedCsrf || storedCsrf !== incomingCsrf || storedRole !== incomingRole || storedAction !== incomingAction) {
     return clearStateCookieAndRedirect("CSRF state mismatch. Potential cross-site request forgery attack detected.");
   }
 
@@ -401,6 +402,7 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
   });
 
   const role = incomingRole;
+  const action = incomingAction;
   let email = "";
   let name = "";
   let avatar = null;
@@ -459,10 +461,12 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
   const normalizedEmail = email.toLowerCase();
   let user = await User.findOne({ email: normalizedEmail });
 
-  // ACCOUNT LINKING: If a local account with the same email exists, link the Google provider to it to prevent duplicate accounts.
-  // Apply strict role and signup rules
+  // ACCOUNT LINKING & ACTION VERIFICATION
   if (role === "patient") {
     if (!user) {
+      if (action === "login") {
+        return clearStateCookieAndRedirect("account_not_found");
+      }
       user = await User.create({
         name,
         email: normalizedEmail,
@@ -473,6 +477,9 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
         isEmailVerified: true
       });
     } else {
+      if (action === "signup") {
+        return clearStateCookieAndRedirect("account_exists");
+      }
       const hasGoogle = user.providers.some(p => p.type === "google");
       if (!hasGoogle) {
         user.providers.push({ type: "google", providerId: googleId });
@@ -481,11 +488,11 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
     }
   } else if (role === "doctor") {
     if (!user || user.role !== "doctor") {
-      return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent("Doctor account not found. Please contact your hospital administrator.")}`);
+      return clearStateCookieAndRedirect("Doctor account not found. Please contact your hospital administrator.");
     }
     const doctorRecord = await Doctor.findOne({ userId: user._id });
     if (!doctorRecord) {
-      return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent("Doctor account not found. Please contact your hospital administrator.")}`);
+      return clearStateCookieAndRedirect("Doctor account not found. Please contact your hospital administrator.");
     }
     const hasGoogle = user.providers.some(p => p.type === "google");
     if (!hasGoogle) {
@@ -494,7 +501,7 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
     }
   } else if (role === "hospital") {
     if (!user || user.role !== "hospital_admin") {
-      return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent("Hospital Admin account not found. Please contact your administrator.")}`);
+      return clearStateCookieAndRedirect("Hospital Admin account not found. Please contact your administrator.");
     }
     const hasGoogle = user.providers.some(p => p.type === "google");
     if (!hasGoogle) {
@@ -502,7 +509,7 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
       await user.save();
     }
   } else {
-    return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent("Invalid login role context.")}`);
+    return clearStateCookieAndRedirect("Invalid login role context.");
   }
 
   if (user.isActive === false || user.accountStatus !== "ACTIVE") {

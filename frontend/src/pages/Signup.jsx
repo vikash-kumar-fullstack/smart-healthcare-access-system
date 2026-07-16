@@ -13,7 +13,13 @@ export default function Signup() {
     const params = new URLSearchParams(window.location.search);
     const errorParam = params.get("error");
     if (errorParam) {
-      toast.error(decodeURIComponent(errorParam));
+      if (errorParam === "account_not_found") {
+        toast.error("Account does not exist. Please sign up first.");
+      } else if (errorParam === "account_exists") {
+        toast.error("An account with this email already exists. Please sign in.");
+      } else {
+        toast.error(decodeURIComponent(errorParam));
+      }
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
@@ -117,7 +123,7 @@ export default function Signup() {
             <button
               type="button"
               onClick={() => {
-                window.location.href = `${import.meta.env.VITE_API_URL}/auth/patient/google?signup=true`;
+                window.location.href = `${import.meta.env.VITE_API_URL}/auth/patient/google?action=signup`;
               }}
               className="w-full h-11 border border-slate-200 hover:border-red-500/30 hover:bg-red-50/20 text-slate-700 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
             >
