@@ -15,17 +15,17 @@ const formatWait = (mins, sessionStatus) => {
 
 // ─── Session status chip styles ───────────────────────────────────────────────
 const SESSION_CHIP = {
-  active:   { label: "Live",        cls: "bg-green-100 text-green-700" },
-  paused:   { label: "On Break",    cls: "bg-yellow-100 text-yellow-700" },
-  inactive: { label: "Not Started", cls: "bg-gray-100 text-gray-500" },
-  closed:   { label: "Closed",      cls: "bg-red-100 text-red-600" }
+  active:   { label: "Live",        cls: "bg-emerald-50 text-emerald-700 border border-emerald-100" },
+  paused:   { label: "On Break",    cls: "bg-amber-50 text-amber-700 border border-amber-100" },
+  inactive: { label: "Not Started", cls: "bg-slate-100 text-slate-600 border border-slate-200" },
+  closed:   { label: "Closed",      cls: "bg-rose-50 text-rose-700 border border-rose-100" }
 };
 
 const AVAILABILITY_MAP = {
-  available:   { label: "Accepting patients", cls: "bg-green-50 text-green-750 border border-green-200" },
-  break:       { label: "On Break",            cls: "bg-yellow-50 text-yellow-800 border border-yellow-200" },
-  delayed:     { label: "Delayed",            cls: "bg-red-50 text-rose-700 border border-rose-200 animate-pulse" },
-  unavailable: { label: "Offline",            cls: "bg-gray-50 text-gray-500 border border-gray-200" }
+  available:   { label: "Accepting patients", cls: "bg-emerald-50 text-emerald-700 border border-emerald-100" },
+  break:       { label: "On Break",            cls: "bg-amber-50 text-amber-700 border border-amber-100" },
+  delayed:     { label: "Delayed",            cls: "bg-rose-50 text-rose-700 border border-rose-100" },
+  unavailable: { label: "Offline",            cls: "bg-slate-100 text-slate-500 border border-slate-200" }
 };
 
 export default function DoctorCard({ doctor, onBook }) {
@@ -40,66 +40,66 @@ export default function DoctorCard({ doctor, onBook }) {
   const avChip = AVAILABILITY_MAP[currentAvState] || AVAILABILITY_MAP.unavailable;
 
   return (
-    <div className="bg-white shadow-sm rounded-xl p-5 mb-4 border border-gray-100 hover:shadow-md transition">
+    <div className="bg-white rounded-lg p-5 mb-4 border border-slate-200 hover:border-slate-300 transition shadow-sm">
 
       {/* ── Top row: name + session chip + rating ─────────────────────────── */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-        <div className="flex items-start gap-3">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div className="flex items-center gap-3">
           {/* Avatar placeholder */}
-          <div className="w-11 h-11 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-lg font-bold flex-shrink-0">
+          <div className="w-10 h-10 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center text-base font-bold flex-shrink-0 border border-slate-200">
             {doctor.name?.[0]?.toUpperCase() || "D"}
           </div>
           <div>
-            <h2 className="text-base font-semibold text-gray-800 leading-tight">
+            <h2 className="text-sm font-semibold text-slate-900 leading-tight">
               {doctor.name}
             </h2>
-            <p className="text-xs text-gray-500 mt-0.5">{doctor.specialization}</p>
+            <p className="text-xs text-slate-500 mt-0.5">{doctor.specialization}</p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
           {/* Session status chip */}
-          <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${chip.cls}`}>
-            ● {chip.label}
+          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-md ${chip.cls}`}>
+            {chip.label}
           </span>
           {/* Availability badge */}
-          <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${avChip.cls}`}>
+          <span className={`text-[11px] font-medium px-2 py-0.5 rounded-md ${avChip.cls}`}>
             {avChip.label}
           </span>
           {/* Rating */}
           {doctor.rating > 0 && (
-            <span className="text-xs text-yellow-600 font-medium bg-yellow-50 px-2.5 py-1 rounded-full">
-              ⭐ {doctor.rating.toFixed(1)}
+            <span className="text-[11px] text-amber-700 font-semibold bg-amber-50 px-2 py-0.5 rounded-md border border-amber-100">
+              ★ {doctor.rating.toFixed(1)}
             </span>
           )}
         </div>
       </div>
 
       {/* ── Info row ──────────────────────────────────────────────────────── */}
-      <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-3 text-xs text-gray-500">
+      <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
 
         {/* Queue load */}
-        <div className="bg-gray-50 rounded-lg px-3 py-2">
-          <p className="font-medium text-gray-400 uppercase tracking-wider mb-0.5">Queue</p>
-          <p className="text-gray-800 font-semibold text-sm">
+        <div className="bg-slate-50 rounded-md p-3 border border-slate-100">
+          <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px] mb-0.5">Queue</p>
+          <p className="text-slate-800 font-bold text-xs">
             {doctor.queueLoad} patient{doctor.queueLoad !== 1 ? "s" : ""}
           </p>
         </div>
 
-        {/* Wait time — KEY FIX: always whole minutes, context-aware label */}
-        <div className="bg-gray-50 rounded-lg px-3 py-2">
-          <p className="font-medium text-gray-400 uppercase tracking-wider mb-0.5">Est. Wait</p>
-          <p className="text-gray-800 font-semibold text-sm">{wait.text}</p>
+        {/* Wait time */}
+        <div className="bg-slate-50 rounded-md p-3 border border-slate-100">
+          <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px] mb-0.5">Est. Wait</p>
+          <p className="text-slate-800 font-bold text-xs">{wait.text}</p>
           {wait.sub && (
-            <p className="text-gray-400 text-xs mt-0.5">{wait.sub}</p>
+            <p className="text-slate-400 text-[10px] mt-0.5">{wait.sub}</p>
           )}
         </div>
 
         {/* Experience */}
         {doctor.experienceYears > 0 && (
-          <div className="bg-gray-50 rounded-lg px-3 py-2">
-            <p className="font-medium text-gray-400 uppercase tracking-wider mb-0.5">Experience</p>
-            <p className="text-gray-800 font-semibold text-sm">{doctor.experienceYears} yrs</p>
+          <div className="bg-slate-50 rounded-md p-3 border border-slate-100">
+            <p className="font-semibold text-slate-400 uppercase tracking-wider text-[10px] mb-0.5">Experience</p>
+            <p className="text-slate-800 font-bold text-xs">{doctor.experienceYears} yrs</p>
           </div>
         )}
 
@@ -107,44 +107,44 @@ export default function DoctorCard({ doctor, onBook }) {
 
       {/* ── Paused/Break notices ────────────────────────────────────────────── */}
       {currentAvState === "break" && (
-        <div className="mt-3 bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs rounded-lg px-3 py-2.5">
-          <strong>⏸️ Doctor is on break:</strong> {doctor.temporaryNotice?.message || "Away from desk."}
+        <div className="mt-3 bg-amber-50 border border-amber-100 text-amber-800 text-xs rounded-md p-3">
+          <strong>Doctor on break:</strong> {doctor.temporaryNotice?.message || "Away from desk."}
           {doctor.temporaryNotice?.expectedUntil && (
-            <span className="block mt-1 text-gray-500 font-medium">
+            <span className="block mt-1 text-slate-500 font-medium">
               Expected return: {new Date(doctor.temporaryNotice.expectedUntil).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </span>
           )}
         </div>
       )}
 
-      {/* ── Delayed notice (Break expected return exceeded) ─────────────────── */}
+      {/* ── Delayed notice ─────────────────────────────────── */}
       {currentAvState === "delayed" && (
-        <div className="mt-3 bg-red-50 border border-red-200 text-red-800 text-xs rounded-lg px-3 py-2.5 animate-pulse">
-          <strong>⚠️ Delayed:</strong> The doctor's expected return time has passed. Notice: {doctor.temporaryNotice?.message || "Expected return exceeded."}
+        <div className="mt-3 bg-rose-50 border border-rose-100 text-rose-800 text-xs rounded-md p-3">
+          <strong>Delayed:</strong> The doctor's expected return time has passed. Notice: {doctor.temporaryNotice?.message || "Expected return exceeded."}
         </div>
       )}
 
       {/* ── Next Available slot info ────────────────────────────────────────── */}
       {!canBook && doctor.nextAvailable && (
-        <div className="mt-3 bg-blue-50 border border-blue-200 text-blue-800 text-xs rounded-lg px-3 py-2">
-          📅 <strong>Next Available:</strong> {doctor.nextAvailable}
+        <div className="mt-3 bg-indigo-50 border border-indigo-100 text-indigo-850 text-xs rounded-md p-3">
+          <strong>Next Available:</strong> {doctor.nextAvailable}
         </div>
       )}
 
       {/* ── Action row ────────────────────────────────────────────────────── */}
-      <div className="mt-4 flex items-center justify-between">
-        <span className={`text-xs font-medium ${canBook ? "text-green-600" : "text-red-500"}`}>
-          {canBook ? "🟢 Accepting patients" : "🔴 Not accepting"}
+      <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3">
+        <span className={`text-[11px] font-medium ${canBook ? "text-emerald-600" : "text-rose-600"}`}>
+          {canBook ? "● Online" : "● Offline"}
         </span>
 
         <button
           onClick={() => onBook(doctorId)}
           disabled={!canBook}
           className={`
-            px-5 py-2 rounded-lg text-sm font-medium transition shadow-sm
+            px-4 py-2 rounded text-xs font-semibold transition
             ${canBook
-              ? "bg-blue-500 hover:bg-blue-600 text-white"
-              : "bg-gray-100 text-gray-400 cursor-not-allowed"}
+              ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm"
+              : "bg-slate-100 text-slate-400 cursor-not-allowed"}
           `}
         >
           {canBook ? "Book Now" : "Unavailable"}

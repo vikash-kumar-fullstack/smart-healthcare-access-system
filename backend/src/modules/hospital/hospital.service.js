@@ -1,11 +1,12 @@
 import Hospital from "./hospital.model.js";
+import HospitalSchedulingPolicy from "./hospital_scheduling_policy.model.js";
 
 export const getHospitals = async (query) => {
 
-  let { specialization, lat, lng, page = 1, limit = 10 } = query;
+  let { specialization, lat, lng, page = 1, limit = 10, sort = "name", order = "asc", search = "" } = query;
 
   const pageNum = parseInt(page) || 1;
-  const limitNum = Math.min(parseInt(limit) || 10, 50); // clamp limit
+  const limitNum = Math.min(parseInt(limit) || 10, 100); // clamp limit
 
   const parsedLat = parseFloat(lat);
   const parsedLng = parseFloat(lng);
@@ -18,6 +19,16 @@ export const getHospitals = async (query) => {
   if (specialization) {
     filter.specializations = { $in: [specialization] };
   }
+
+  if (search) {
+    filter.$or = [
+      { name: { $regex: search, $options: "i" } },
+      { address: { $regex: search, $options: "i" } }
+    ];
+  }
+
+  const sortDirection = order.toLowerCase() === "desc" ? -1 : 1;
+  const sortOption = { [sort]: sortDirection };
 
   let hospitals;
 
@@ -34,15 +45,19 @@ export const getHospitals = async (query) => {
         }
       }
     })
+      .sort(sortOption)
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum)
+      .maxTimeMS(5000)
       .lean();
   }
 
   else {
     hospitals = await Hospital.find(filter)
+      .sort(sortOption)
       .skip((pageNum - 1) * limitNum)
       .limit(limitNum)
+      .maxTimeMS(5000)
       .lean();
   }
 
@@ -60,9 +75,11 @@ export const getHospitals = async (query) => {
 
     return {
       data: {
+        _id: h._id,
         id: h._id,
         name: h.name,
         address: h.address,
+        city: h.city || (typeof h.address === 'object' ? h.address?.city : null),
         specializations: h.specializations,
         rating: h.rating
       },
@@ -89,15 +106,16 @@ export const getHospitals = async (query) => {
           ]
         }
       }
-    });
+    }).maxTimeMS(5000);
   } else {
-    total = await Hospital.countDocuments(filter);
+    total = await Hospital.countDocuments(filter).maxTimeMS(5000);
   }
 
   return {
     total,
     page: pageNum,
     limit: limitNum,
+    totalPages: Math.ceil(total / limitNum),
     data: cleanHospitals
   };
 };
@@ -112,7 +130,7 @@ export const createHospitalService = async (data) => {
     throw err;
   }
 
-  return await Hospital.create({
+  const hosp = await Hospital.create({
     name,
     address,
     location: {
@@ -121,6 +139,9 @@ export const createHospitalService = async (data) => {
     },
     specializations
   });
+
+  await HospitalSchedulingPolicy.create({ hospitalId: hosp._id });
+  return hosp;
 };
 
 export const updateHospitalService = async (id, data) => {
@@ -155,4 +176,12 @@ export const disableHospitalService = async (id) => {
   }
 
   return hospital;
+};
+
+export const getHospitalSchedulingPolicy = async (hospitalId) => {
+  let policy = await HospitalSchedulingPolicy.findOne({ hospitalId });
+  if (!policy) {
+    policy = await HospitalSchedulingPolicy.create({ hospitalId });
+  }
+  return policy;
 };

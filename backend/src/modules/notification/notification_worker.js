@@ -121,7 +121,7 @@ const processOutboxItem = async (outbox) => {
       const timeZone = quietHours.timezone || "Asia/Kolkata";
       const timeStr = now.toLocaleTimeString("en-US", { hour12: false, timeZone });
       const [nowH, nowM] = timeStr.split(":").map(Number);
-      const nowVal = nowH * 60 + nowM;
+      const nowVal = (nowH % 24) * 60 + nowM;
 
       const [startH, startM] = quietHours.start.split(":").map(Number);
       const [endH, endM] = quietHours.end.split(":").map(Number);

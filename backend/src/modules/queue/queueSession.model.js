@@ -32,7 +32,18 @@ const queueSessionSchema = new mongoose.Schema({
   scheduleSnapshot: {
     startTime: { type: String },
     endTime: { type: String },
-    queueLimit: { type: Number }
+    queueLimit: { type: Number },
+    doctorName: { type: String },
+    hospitalName: { type: String },
+    averageConsultationTime: { type: Number },
+    scheduleVersion: { type: Number }
+  },
+
+  // Deterministic state machine field
+  sessionState: {
+    type: String,
+    enum: ["CREATED", "READY", "ACTIVE", "PAUSED", "COMPLETED", "CANCELLED"],
+    default: "CREATED"
   },
 
   // Full state machine field
@@ -59,7 +70,32 @@ const queueSessionSchema = new mongoose.Schema({
 
 }, { timestamps: true });
 
-queueSessionSchema.index({ doctorId: 1, date: 1 }, { unique: true });
+queueSessionSchema.pre("save", function () {
+  if (this.isModified("sessionStatus")) {
+    const status = this.sessionStatus;
+    if (status === "inactive") this.sessionState = "CREATED";
+    else if (status === "active") this.sessionState = "ACTIVE";
+    else if (status === "paused") this.sessionState = "PAUSED";
+    else if (status === "closed" || status === "closing") this.sessionState = "COMPLETED";
+  } else if (this.isModified("sessionState")) {
+    const state = this.sessionState;
+    if (state === "CREATED" || state === "READY") {
+      this.sessionStatus = "inactive";
+      this.isActive = false;
+    } else if (state === "ACTIVE") {
+      this.sessionStatus = "active";
+      this.isActive = true;
+    } else if (state === "PAUSED") {
+      this.sessionStatus = "paused";
+      this.isActive = true;
+    } else if (state === "COMPLETED" || state === "CANCELLED") {
+      this.sessionStatus = "closed";
+      this.isActive = false;
+    }
+  }
+});
+
+queueSessionSchema.index({ doctorId: 1, date: 1, "scheduleSnapshot.startTime": 1 }, { unique: true });
 queueSessionSchema.index({ doctorId: 1, sessionStatus: 1, date: -1 });
 
 queueSessionSchema.post("save", async function (doc) {

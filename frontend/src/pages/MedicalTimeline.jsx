@@ -2,9 +2,10 @@ import { useState, useEffect } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import api from "../services/api";
 import toast from "react-hot-toast";
+import { Users } from "lucide-react";
 
 export default function MedicalTimeline() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const patientIdQuery = searchParams.get("patientId") || "";
 
   const [role, setRole] = useState("");
@@ -12,12 +13,25 @@ export default function MedicalTimeline() {
   const [timelineData, setTimelineData] = useState({});
   const [nextCursor, setNextCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
+  const [doctorQueue, setDoctorQueue] = useState([]);
+  const [manualPatientId, setManualPatientId] = useState("");
 
   const fetchRole = () => {
     const userStr = localStorage.getItem("user");
     if (userStr) {
       const u = JSON.parse(userStr);
       setRole(u.role);
+    }
+  };
+
+  const fetchDoctorQueue = async () => {
+    try {
+      const response = await api.get("/queue/doctor/timeline");
+      if (response.data?.success) {
+        setDoctorQueue(response.data.data || []);
+      }
+    } catch (err) {
+      console.error("Failed to load doctor queue for timeline selection:", err);
     }
   };
 
@@ -32,7 +46,6 @@ export default function MedicalTimeline() {
       const data = response.data.data;
       
       if (cursorVal) {
-        // Merge with existing timeline data
         setTimelineData(prev => {
           const merged = { ...prev };
           Object.keys(data.records).forEach(year => {
@@ -45,7 +58,7 @@ export default function MedicalTimeline() {
           return merged;
         });
       } else {
-        setTimelineData(data.records);
+        setTimelineData(data.records || {});
       }
 
       setNextCursor(data.nextCursor);
@@ -64,7 +77,12 @@ export default function MedicalTimeline() {
 
   useEffect(() => {
     if (role) {
-      fetchTimeline();
+      if (role === "doctor" && !patientIdQuery) {
+        fetchDoctorQueue();
+        setLoading(false);
+      } else {
+        fetchTimeline();
+      }
     }
   }, [role, patientIdQuery]);
 
@@ -74,9 +92,18 @@ export default function MedicalTimeline() {
     }
   };
 
+  const handleManualSearch = (e) => {
+    e.preventDefault();
+    if (!manualPatientId.trim()) {
+      toast.error("Please enter a valid Patient ID.");
+      return;
+    }
+    setSearchParams({ patientId: manualPatientId.trim() });
+  };
+
   const years = Object.keys(timelineData).sort((a, b) => parseInt(b) - parseInt(a));
 
-  if (loading && Object.keys(timelineData).length === 0) {
+  if (loading && Object.keys(timelineData).length === 0 && doctorQueue.length === 0) {
     return (
       <div className="text-center py-24">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mx-auto mb-3" />
@@ -85,11 +112,94 @@ export default function MedicalTimeline() {
     );
   }
 
+  // Doctor view when no patient is selected
+  if (role === "doctor" && !patientIdQuery) {
+    return (
+      <div className="max-w-4xl mx-auto px-4 py-8 text-left">
+        <div className="mb-8">
+          <h1 className="text-3xl font-extrabold text-[#0F4C81] tracking-tight">
+            Chronological Health Timeline
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Access secure, longitudinal timeline records of patients by selecting from today's active queue or searching.
+          </p>
+        </div>
+
+        {/* Manual Lookup form */}
+        <div className="bg-white rounded-2xl border border-slate-200/60 p-5 shadow-sm mb-8">
+          <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-3">Lookup Patient timeline directly</h4>
+          <form onSubmit={handleManualSearch} className="flex gap-3">
+            <input
+              type="text"
+              required
+              placeholder="Enter Patient User ID (e.g. 64b8f...)"
+              value={manualPatientId}
+              onChange={(e) => setManualPatientId(e.target.value)}
+              className="h-10 flex-1 px-4 border border-slate-200 rounded-xl text-xs outline-none focus:border-[#0E7490]"
+            />
+            <button
+              type="submit"
+              className="h-10 px-6 bg-[#0E7490] hover:bg-[#0c5f76] text-white text-xs font-bold rounded-xl shadow transition border-none cursor-pointer"
+            >
+              LOAD TIMELINE
+            </button>
+          </form>
+        </div>
+
+        {/* Active Patients Queue list */}
+        <div className="bg-white rounded-2xl border border-slate-200/60 p-6 shadow-sm">
+          <h3 className="text-sm font-black text-slate-800 uppercase tracking-wider flex items-center gap-2 mb-4">
+            <Users className="h-4.5 w-4.5 text-[#0E7490]" />
+            Active Patients in Your Queue Today
+          </h3>
+
+          {doctorQueue.length === 0 ? (
+            <div className="text-center py-8 text-slate-450">
+              <p className="text-xs font-bold">No active queue records today.</p>
+              <p className="text-[11px] mt-0.5">Checked-in patients will appear here for chronological lookups.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {doctorQueue.map((booking) => (
+                <div key={booking._id} className="p-4 border border-slate-200 rounded-2xl bg-slate-50/50 flex flex-col justify-between">
+                  <div>
+                    <span className="text-[9px] font-black uppercase text-[#0E7490] bg-[#DFF8F6] px-2 py-0.5 rounded-full">
+                      {booking.bookingNumber}
+                    </span>
+                    <h4 className="font-extrabold text-slate-850 text-sm mt-2">{booking.userId?.name}</h4>
+                    <p className="text-xs text-slate-455 mt-0.5">Phone: {booking.userId?.phone}</p>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-500">Slot: {booking.slotTime}</span>
+                    <button
+                      onClick={() => setSearchParams({ patientId: booking.userId?._id })}
+                      className="px-3.5 py-1.5 bg-[#0E7490] hover:bg-[#0c5f76] text-white text-xs font-bold rounded-xl transition border-none cursor-pointer shadow-sm"
+                    >
+                      View Timeline
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
+    <div className="max-w-4xl mx-auto px-4 py-8 text-left">
       {/* Back to list link */}
-      <Link to={role === "doctor" ? "/doctor/medical-records" : "/patient/medical-records"} className="text-blue-600 hover:text-blue-800 text-sm font-bold flex items-center gap-1 mb-6">
-        ← Back to records
+      <Link 
+        to={role === "doctor" ? "/doctor/medical-records" : "/patient/medical-records"} 
+        onClick={() => {
+          if (role === "doctor" && patientIdQuery) {
+            setSearchParams({}); // clear patient parameter
+          }
+        }}
+        className="text-blue-600 hover:text-blue-800 text-sm font-bold flex items-center gap-1 mb-6"
+      >
+        ← {role === "doctor" ? "Back to Queue list" : "Back to records"}
       </Link>
 
       <div className="mb-8">
@@ -167,7 +277,7 @@ export default function MedicalTimeline() {
         <div className="text-center mt-10">
           <button
             onClick={handleLoadMore}
-            className="px-6 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold rounded-xl shadow-sm transition"
+            className="px-6 py-2 bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold rounded-xl shadow-sm transition cursor-pointer border-none"
           >
             Load Older Timeline Entries
           </button>

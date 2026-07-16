@@ -1,32 +1,35 @@
 import express from "express";
 import {
-  dashboard,
-  refreshDashboard,
-  getHospitals,
-  getHospitalById,
-  updateHospital,
-  suspendHospital,
-  reopenHospital,
-  archiveHospital,
-  getDoctors,
-  approveDoctor,
-  verifyDoctor,
-  suspendDoctor,
-  resetDoctor,
-  getQueues,
-  forceCloseQueue,
-  forceReopenQueue,
-  emergencyPauseQueue,
-  reassignPatient,
-  triggerReport,
-  getReports,
-  getReportById,
-  getSystemHealth,
-  getAdminAudits,
-  getEmergencyState,
-  updateEmergencyStateField,
-  getSessions,
-  logoutAll
+    dashboard,
+    refreshDashboard,
+    getHospitals,
+    getHospitalById,
+    updateHospital,
+    suspendHospital,
+    reopenHospital,
+    archiveHospital,
+    getDoctors,
+    approveDoctor,
+    verifyDoctor,
+    suspendDoctor,
+    resetDoctor,
+    getQueues,
+    forceCloseQueue,
+    forceReopenQueue,
+    emergencyPauseQueue,
+    reassignPatient,
+    revertIntervention,
+    triggerReport,
+    getReports,
+    getReportById,
+    getSystemHealth,
+    getAdminAudits,
+    getEmergencyState,
+    updateEmergencyStateField,
+    getSessions,
+    logoutAll,
+    getSecurityStats,
+    getSecurityIncidents
 } from "./admin.controller.js";
 import { adminRetry } from "../notification/notification.controller.js";
 import authMiddleware from "../../middlewares/auth.middleware.js";
@@ -36,8 +39,8 @@ const router = express.Router();
 
 // Request tracing middleware (Lock 3)
 router.use((req, res, next) => {
-  req.requestId = req.headers["x-request-id"] || `req-${Math.random().toString(36).substring(2, 15)}`;
-  next();
+    req.requestId = req.headers["x-request-id"] || `req-${Math.random().toString(36).substring(2, 15)}`;
+    next();
 });
 
 // General Admin Routes (Require Admin Auth)
@@ -48,6 +51,8 @@ router.get("/sessions", authMiddleware, adminMiddleware, getSessions);
 router.post("/logout-all", authMiddleware, adminMiddleware, logoutAll);
 router.get("/audits", authMiddleware, adminMiddleware, getAdminAudits);
 router.get("/health", authMiddleware, adminMiddleware, getSystemHealth);
+router.get("/security/stats", authMiddleware, adminMiddleware, getSecurityStats);
+router.get("/security/incidents", authMiddleware, adminMiddleware, getSecurityIncidents);
 
 // Hospitals (Requires "hospitals" permission)
 router.get("/hospitals", authMiddleware, requirePermission("hospitals"), getHospitals);
@@ -70,6 +75,7 @@ router.patch("/queues/:id/close", authMiddleware, requirePermission("local queue
 router.patch("/queues/:id/reopen", authMiddleware, requirePermission("local queues"), forceReopenQueue);
 router.patch("/queues/:id/pause", authMiddleware, requirePermission("local queues"), emergencyPauseQueue);
 router.patch("/queues/reassign", authMiddleware, requirePermission("local queues"), reassignPatient);
+router.patch("/interventions/:id/revert", authMiddleware, requirePermission("local queues"), revertIntervention);
 
 // Reports (Requires "reports" permission)
 router.post("/reports", authMiddleware, requirePermission("reports"), triggerReport);

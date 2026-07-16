@@ -5,6 +5,7 @@ import NotificationCounter from "./notification_counter.model.js";
 import NotificationPreferences from "./notification_preferences.model.js";
 import NotificationOutbox from "./notification_outbox.model.js";
 import { decrementUnread } from "./notification_counter.service.js";
+import { paginate } from "../../utils/pagination.js";
 
 // GET /api/v1/notifications?view=unread|archived|today|earlier
 export const getAll = asyncHandler(async (req, res) => {
@@ -35,17 +36,25 @@ export const getAll = asyncHandler(async (req, res) => {
     query.archivedAt = { $exists: false };
   }
 
-  const data = await Notification.find(query).sort({ sequenceNumber: 1 });
+  if (req.query.page !== undefined) {
+    const result = await paginate(Notification, req.query, query);
+    return successResponse(res, result, "Notifications fetched");
+  }
+
+  const data = await Notification.find(query).sort({ sequenceNumber: 1 }).maxTimeMS(5000).lean();
   return successResponse(res, data, "Notifications fetched");
 });
 
 // GET /api/v1/notifications/unread
 export const getUnreadCount = asyncHandler(async (req, res) => {
   const userId = req.user.userId;
-  const counter = await NotificationCounter.findOne({ userId });
+  const count = await Notification.countDocuments({
+    recipientUserId: userId,
+    status: { $nin: ["read", "archived", "expired", "purged"] }
+  });
   return successResponse(
     res,
-    { unreadCount: counter ? counter.unreadCount : 0 },
+    { unreadCount: count },
     "Unread count fetched"
   );
 });
@@ -60,14 +69,20 @@ export const read = asyncHandler(async (req, res) => {
     throw Object.assign(new Error("Notification not found"), { status: 404 });
   }
 
-  const wasDelivered = notification.status === "delivered";
+  const wasDelivered = !["read", "archived", "expired", "purged"].includes(notification.status);
   notification.status = "read";
   notification.readAt = new Date();
   await notification.save();
 
-  if (wasDelivered) {
-    await decrementUnread(userId);
-  }
+  const remainingCount = await Notification.countDocuments({
+    recipientUserId: userId,
+    status: { $nin: ["read", "archived", "expired", "purged"] }
+  });
+  await NotificationCounter.findOneAndUpdate(
+    { userId },
+    { unreadCount: remainingCount },
+    { upsert: true }
+  );
 
   return successResponse(res, notification, "Notification marked as read");
 });
@@ -81,7 +96,7 @@ export const readAll = asyncHandler(async (req, res) => {
 
   const toUpdate = await Notification.find({
     recipientUserId: userId,
-    status: "delivered",
+    status: { $nin: ["read", "archived", "expired", "purged"] },
     createdAt: { $lte: before }
   });
 
@@ -92,9 +107,13 @@ export const readAll = asyncHandler(async (req, res) => {
       n.readAt = new Date();
       await n.save();
     }
+    const remainingCount = await Notification.countDocuments({
+      recipientUserId: userId,
+      status: { $nin: ["read", "archived", "expired", "purged"] }
+    });
     await NotificationCounter.findOneAndUpdate(
       { userId },
-      { $inc: { unreadCount: -count } },
+      { unreadCount: remainingCount },
       { upsert: true }
     );
   }
@@ -156,6 +175,28 @@ export const updatePreferences = asyncHandler(async (req, res) => {
 
   return successResponse(res, prefs, "Notification preferences updated");
 });
+
+// GET /api/v1/notifications/preferences
+export const getPreferences = asyncHandler(async (req, res) => {
+  const userId = req.user.userId;
+  let prefs = await NotificationPreferences.findOne({ userId });
+  if (!prefs) {
+    prefs = await NotificationPreferences.create({
+      userId,
+      categories: {
+        queue: { in_app: true, push: true },
+        session: { in_app: true, push: true },
+        doctor: { in_app: true, push: true },
+        system: { in_app: true, push: true },
+        marketing: { in_app: true, push: true }
+      },
+      quietHours: { enabled: false },
+      emergencyBypass: true
+    });
+  }
+  return successResponse(res, prefs, "Notification preferences fetched");
+});
+
 
 // POST /api/v1/admin/notifications/retry
 export const adminRetry = asyncHandler(async (req, res) => {

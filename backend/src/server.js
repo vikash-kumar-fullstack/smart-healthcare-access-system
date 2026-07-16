@@ -8,8 +8,13 @@ import { initNotificationWorkers } from "./modules/notification/notification_wor
 import { initSearchWorkers } from "./modules/search/search_worker.js";
 import { initHealthWorker } from "./modules/admin/system_health_worker.js";
 import { initReportWorker } from "./modules/admin/admin_report_worker.js";
+import { initRealtimeWorkers } from "./modules/realtime/realtime_worker.js";
+import { startReminderWorker } from "./modules/queue/reminder_worker.js";
+import { validateEnvironment } from "./config/environment.validator.js";
+import { initializeWorkers } from "./workers/index.js";
 
 dotenv.config();
+validateEnvironment();
 
 const PORT = process.env.PORT || 5000;
 const server = http.createServer(app);
@@ -21,6 +26,8 @@ initSocket(server);
 connectDB().then(() => {
   // Initialize cron schedules
   initCronJobs();
+  // Initialize isolated background cron jobs
+  initializeWorkers();
   // Initialize background notification processing workers
   initNotificationWorkers(500);
   // Initialize background search analytics processing workers
@@ -29,6 +36,10 @@ connectDB().then(() => {
   initHealthWorker(60000);
   // Initialize async report builder worker
   initReportWorker(5000);
+  // Initialize realtime retry and cleanup workers
+  initRealtimeWorkers(2000);
+  // Initialize appointment reminder & no-show worker
+  startReminderWorker(10000);
 });
 
 server.listen(PORT, () => {

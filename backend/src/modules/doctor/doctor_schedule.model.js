@@ -23,10 +23,26 @@ const doctorScheduleSchema = new mongoose.Schema({
   enabled: {
     type: Boolean,
     default: true
+  },
+  status: {
+    type: String,
+    enum: ["draft", "published", "archived"],
+    default: "published"
+  },
+  version: {
+    type: Number,
+    default: 1
+  },
+  effectiveFrom: {
+    type: Date,
+    default: () => new Date()
+  },
+  effectiveUntil: {
+    type: Date
   }
 }, { timestamps: true });
 
-doctorScheduleSchema.index({ doctorId: 1, dayOfWeek: 1 }, { unique: true });
+doctorScheduleSchema.index({ doctorId: 1, dayOfWeek: 1, startTime: 1, version: 1 }, { unique: true });
 
 doctorScheduleSchema.post("save", async function (doc) {
   try {

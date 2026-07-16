@@ -1,3 +1,15 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+dist-ssr
+
+# Environment files
+.env
+.env.*
+*.local
+
 # Logs
 logs
 *.log
@@ -7,12 +19,14 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# Generated reports
+frontend-architecture-report.json
+frontend-audit-report.json
 
-# Editor directories and files
+# Scripts folder if purely experimental
+scripts/
+
+# Editor files
 .vscode/*
 !.vscode/extensions.json
 .idea

@@ -19,6 +19,13 @@ const queueInterventionSchema = new mongoose.Schema({
     type: String,
     enum: ["force_close", "force_reopen", "emergency_pause", "reassign_patient"],
     required: true
+  },
+  rollbackData: {
+    type: mongoose.Schema.Types.Mixed
+  },
+  revertedAt: {
+    type: Date,
+    default: null
   }
 }, { timestamps: true });
 

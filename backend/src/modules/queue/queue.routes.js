@@ -1,22 +1,35 @@
 import express from "express";
 import {
-  book,
-  complete,
+  checkIn,
+  receptionOverride,
+  registerWalkIn,
+  getReceptionDashboard,
+  getDoctorTimeline,
+  callNext,
   skip,
+  getTimelineLogs,
+  getOperationalAnalytics,
+  getBookingById
+} from "./appointment_orchestration.controller.js";
+import {
+  book,
+  myQueue,
+  history,
+  cancel,
+  doctorQueue,
+  complete,
+  skip as queueSkip,
   noShow,
   start,
   pause,
   resume,
-  close,
-  myQueue,
-  doctorQueue,
-  cancel,
-  history
+  close
 } from "./queue.controller.js";
 import authMiddleware from "../../middlewares/auth.middleware.js";
 import { authorizeRoles } from "../../middlewares/authorize.middleware.js";
-import { bookingLimiter } from "../../middlewares/rateLimiter.middleware.js";
+import { bookingRateLimiter } from "../../middlewares/rate-limit.middleware.js";
 import { ensureDoctorActive } from "../../middlewares/ensureDoctorActive.middleware.js";
+import ensureProfileCompleted from "../../middlewares/profile.middleware.js";
 
 import SystemEmergencyState from "../admin/system_emergency_state.model.js";
 
@@ -38,24 +51,32 @@ const checkEmergencyBooking = async (req, res, next) => {
 const router = express.Router();
 
 // ── Patient routes ────────────────────────────────────────────────────────────
-// bookingLimiter: 5 attempts / 10 min per user — prevents spam/race conditions
-router.post("/book",    authMiddleware, authorizeRoles("patient"), checkEmergencyBooking, bookingLimiter, book);
-router.get("/my",       authMiddleware, authorizeRoles("patient"), myQueue);
+router.post("/book",    authMiddleware, ensureProfileCompleted, authorizeRoles("patient"), checkEmergencyBooking, bookingRateLimiter, book);
+router.post("/checkin", authMiddleware, ensureProfileCompleted, checkIn);
+router.get("/my",       authMiddleware, ensureProfileCompleted, authorizeRoles("patient"), myQueue);
+router.get("/history",  authMiddleware, ensureProfileCompleted, authorizeRoles("patient"), history);
 router.patch("/cancel", authMiddleware, authorizeRoles("patient"), cancel);
-router.get("/history",  authMiddleware, authorizeRoles("patient"), history);
+router.get("/timeline/:bookingId", authMiddleware, ensureProfileCompleted, getTimelineLogs);
+router.get("/booking/:id", authMiddleware, ensureProfileCompleted, getBookingById);
 
-// ── Doctor queue view ─────────────────────────────────────────────────────────
-router.get("/doctor",   authMiddleware, authorizeRoles("doctor"), ensureDoctorActive, doctorQueue);
+// ── Doctor patient orchestration actions ──────────────────────────────────────
+router.get("/doctor/timeline", authMiddleware, authorizeRoles("doctor"), ensureDoctorActive, getDoctorTimeline);
+router.patch("/doctor/call-next", authMiddleware, authorizeRoles("doctor"), ensureDoctorActive, callNext);
+router.patch("/doctor/skip-consult", authMiddleware, authorizeRoles("doctor"), ensureDoctorActive, skip);
 
-// ── Doctor patient actions ────────────────────────────────────────────────────
-router.patch("/complete", authMiddleware, authorizeRoles("doctor"), ensureDoctorActive, complete);
-router.patch("/skip",     authMiddleware, authorizeRoles("doctor"), ensureDoctorActive, skip);
-router.patch("/no-show",  authMiddleware, authorizeRoles("doctor"), ensureDoctorActive, noShow);
+router.get("/doctor",           authMiddleware, authorizeRoles("doctor"), doctorQueue);
+router.patch("/start-session",  authMiddleware, authorizeRoles("doctor"), start);
+router.patch("/pause-session",  authMiddleware, authorizeRoles("doctor"), pause);
+router.patch("/resume-session", authMiddleware, authorizeRoles("doctor"), resume);
+router.patch("/close-session",  authMiddleware, authorizeRoles("doctor"), close);
+router.patch("/complete",       authMiddleware, authorizeRoles("doctor"), complete);
+router.patch("/skip",           authMiddleware, authorizeRoles("doctor"), queueSkip);
+router.patch("/no-show",        authMiddleware, authorizeRoles("doctor"), noShow);
 
-// ── Doctor session lifecycle ──────────────────────────────────────────────────
-router.patch("/start-session",  authMiddleware, authorizeRoles("doctor"), ensureDoctorActive, start);
-router.patch("/pause-session",  authMiddleware, authorizeRoles("doctor"), ensureDoctorActive, pause);
-router.patch("/resume-session", authMiddleware, authorizeRoles("doctor"), ensureDoctorActive, resume);
-router.patch("/close-session",  authMiddleware, authorizeRoles("doctor"), ensureDoctorActive, close);
+// ── Receptionist / Admin override actions ─────────────────────────────────────
+router.patch("/booking/:id/override", authMiddleware, authorizeRoles("admin", "receptionist"), receptionOverride);
+router.post("/walkin", authMiddleware, authorizeRoles("admin", "receptionist"), registerWalkIn);
+router.get("/reception", authMiddleware, getReceptionDashboard);
+router.get("/analytics", authMiddleware, getOperationalAnalytics);
 
 export default router;

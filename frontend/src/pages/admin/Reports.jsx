@@ -3,7 +3,6 @@ import api from "../../services/api";
 import { 
   FileSpreadsheet, 
   Plus, 
-  Download, 
   Eye, 
   RefreshCw 
 } from "lucide-react";
@@ -20,7 +19,8 @@ export default function Reports() {
     try {
       const res = await api.get("/admin/reports");
       if (res.data.success) {
-        setReports(res.data.data);
+        const list = Array.isArray(res.data.data) ? res.data.data : (res.data.data?.data || []);
+        setReports(list);
       }
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load reports history");
@@ -75,26 +75,26 @@ export default function Reports() {
   return (
     <div className="space-y-6">
       {error && (
-        <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-4 rounded-lg font-mono text-xs">
+        <div className="bg-rose-500/10 border border-rose-500/30 text-rose-650 p-4 rounded-xl font-mono text-xs text-left font-bold">
           <strong>ERROR:</strong> {error}
         </div>
       )}
 
       {/* Trigger Form */}
-      <div className="bg-slate-950/40 p-6 rounded-xl border border-slate-800 backdrop-blur shadow-md max-w-xl">
-        <h4 className="font-bold text-slate-100 tracking-wide font-mono border-b border-slate-800 pb-3 flex items-center gap-2">
-          <FileSpreadsheet className="w-4 h-4 text-teal-400" />
+      <div className="bg-white p-6 rounded-2xl border border-slate-200/50 hover:shadow-md transition-all duration-200 shadow-sm max-w-xl text-left">
+        <h4 className="font-extrabold text-slate-800 tracking-tight border-b border-slate-100 pb-3 flex items-center gap-2">
+          <FileSpreadsheet className="w-4 h-4 text-[#0E7490]" />
           Request New Administrative Summary Report
         </h4>
         <form onSubmit={handleRequestReport} className="flex flex-col sm:flex-row gap-4 items-end mt-4">
-          <div className="flex-1">
-            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold block mb-1">
+          <div className="flex-1 w-full">
+            <label className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold block mb-1">
               Select Report Profile
             </label>
             <select
               value={reportType}
               onChange={(e) => setReportType(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-xs focus:border-teal-500 outline-none text-slate-200"
+              className="w-full bg-white border border-slate-250 rounded-lg px-3 py-2.5 text-xs focus:border-[#0E7490] outline-none text-slate-700 cursor-pointer"
             >
               <option value="doctor_performance">Doctor Performance (Queue Metrics)</option>
               <option value="queue_summary">Daily Queue Activity Summary</option>
@@ -105,7 +105,7 @@ export default function Reports() {
           <button
             type="submit"
             disabled={requesting}
-            className="flex items-center justify-center gap-1.5 bg-teal-500 hover:bg-teal-600 active:bg-teal-700 text-slate-950 font-bold px-4 py-2.5 rounded-lg text-xs transition duration-200 disabled:opacity-50 font-mono shadow-lg shadow-teal-500/10 shrink-0"
+            className="flex items-center justify-center gap-1.5 bg-[#14B8A6] hover:bg-[#119f90] text-white font-bold px-4 py-2.5 rounded-lg text-xs transition duration-200 disabled:opacity-50 font-mono shadow-sm shrink-0 cursor-pointer border-none h-[38px]"
           >
             <Plus className="w-4 h-4" />
             Generate Report
@@ -114,9 +114,9 @@ export default function Reports() {
       </div>
 
       {/* List reports generated */}
-      <div className="bg-slate-950/40 border border-slate-800 rounded-xl overflow-hidden shadow-md">
+      <div className="bg-white border border-slate-200/50 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200">
         <table className="w-full text-left text-xs font-sans">
-          <thead className="bg-slate-950 text-slate-300 border-b border-slate-800 text-[10px] uppercase font-mono">
+          <thead className="bg-slate-50 text-slate-500 border-b border-slate-200/80 text-[10px] uppercase font-mono">
             <tr>
               <th className="p-4">Report Type</th>
               <th className="p-4">Requested By</th>
@@ -125,32 +125,32 @@ export default function Reports() {
               <th className="p-4 text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800/60 font-mono">
+          <tbody className="divide-y divide-slate-100 font-mono">
             {reports.map((rep) => (
-              <tr key={rep._id} className="hover:bg-slate-900/30 transition text-slate-300">
-                <td className="p-4 font-semibold text-slate-200 capitalize">{rep.reportType.replace("_", " ")}</td>
-                <td className="p-4 text-slate-400">{rep.requestedBy?.name || "System"}</td>
+              <tr key={rep._id} className="hover:bg-slate-50/50 transition text-slate-700">
+                <td className="p-4 font-semibold text-slate-800 capitalize">{rep.reportType.replace("_", " ")}</td>
+                <td className="p-4 text-slate-500">{rep.requestedBy?.name || "System"}</td>
                 <td className="p-4">
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
                     rep.status === "completed" 
-                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                      ? "bg-emerald-50 text-emerald-600 border border-emerald-100/50"
                       : rep.status === "processing"
-                      ? "bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse"
+                      ? "bg-amber-50 text-amber-600 border border-amber-100/50 animate-pulse"
                       : rep.status === "failed"
-                      ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
-                      : "bg-slate-800 text-slate-400 border border-slate-700"
+                      ? "bg-rose-50 text-rose-600 border border-rose-100/50"
+                      : "bg-slate-100 text-slate-500 border border-slate-200"
                   }`}>
                     {rep.status}
                   </span>
                 </td>
-                <td className="p-4 text-slate-400">
+                <td className="p-4 text-slate-500">
                   {rep.generatedAt ? new Date(rep.generatedAt).toLocaleString() : "Pending Calculation..."}
                 </td>
                 <td className="p-4 text-right">
                   {rep.status === "completed" && (
                     <button
                       onClick={() => handleViewPayload(rep._id)}
-                      className="inline-flex items-center gap-1 px-3 py-1 bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 font-bold rounded-lg text-xs transition duration-200"
+                      className="inline-flex items-center gap-1 px-3 py-1 bg-slate-50 border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold rounded-lg text-xs transition duration-200 cursor-pointer"
                     >
                       <Eye className="w-3.5 h-3.5" />
                       View Data
@@ -172,19 +172,19 @@ export default function Reports() {
 
       {/* JSON Viewer modal / details panel */}
       {viewingPayload && (
-        <div className="bg-slate-950/60 border border-teal-500/30 p-6 rounded-xl space-y-4 animate-fadeIn max-h-[400px] overflow-y-auto">
-          <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-            <h4 className="font-bold text-slate-100 text-sm font-mono capitalize">
+        <div className="bg-white border border-slate-200/50 p-6 rounded-2xl shadow-md space-y-4 animate-fadeIn max-h-[400px] overflow-y-auto text-left">
+          <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+            <h4 className="font-extrabold text-slate-800 text-sm capitalize">
               Data Payload: {viewingPayload.reportType.replace("_", " ")}
             </h4>
             <button
               onClick={() => setViewingPayload(null)}
-              className="text-xs font-bold text-slate-400 hover:text-slate-200"
+              className="text-xs font-bold text-slate-500 hover:text-slate-700 cursor-pointer bg-none border-none"
             >
               Dismiss
             </button>
           </div>
-          <pre className="bg-slate-900/60 p-4 rounded-lg border border-slate-800 text-[10px] text-teal-300 font-mono overflow-x-auto select-all max-h-[300px]">
+          <pre className="bg-slate-50 p-4 rounded-xl border border-slate-150 text-[10.5px] text-[#0E7490] font-mono overflow-x-auto select-all max-h-[300px]">
             {JSON.stringify(viewingPayload.payload, null, 2)}
           </pre>
         </div>

@@ -5,7 +5,8 @@ import SearchOutbox from "./search_outbox.model.js";
 import { getGlobalVersions, getTodayIST } from "./utils.js";
 import { normalizeQuery, findMatchingSymptom } from "./symptom.service.js";
 import { getCandidateDoctors } from "./search.repository.js";
-import { getOrRecomputeSnapshot } from "./availability.service.js";
+import { getOrRecomputeSnapshot, updateDoctorAvailabilitySnapshot } from "./availability.service.js";
+import DoctorAvailabilitySnapshot from "./doctor_availability_snapshot.model.js";
 import { calculateRankingScore } from "./ranking.service.js";
 import { evaluateRecommendation } from "./recommendation.service.js";
 
@@ -46,7 +47,7 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
 
     if (isFresh) {
       const latency = Date.now() - startTime;
-      
+
       // Enqueue Outbox event for cache hit
       await SearchOutbox.create({
         eventType: "SEARCH_EXECUTED",
@@ -90,15 +91,36 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
       const qLower = normalizedRaw.toLowerCase();
       candidates = candidates.filter(doc =>
         doc.name.toLowerCase().includes(qLower) ||
-        doc.specialization.toLowerCase().includes(qLower)
+        doc.specialization.toLowerCase().includes(qLower) ||
+        (doc.hospitalId && doc.hospitalId.name && doc.hospitalId.name.toLowerCase().includes(qLower))
       );
     }
 
-    // Stage 3: Availability Filter (LOCK 7, 18)
+    // Stage 3: Availability Filter (LOCK 7, 18 - Optimized for Phase 14.6)
+    const doctorIds = candidates.map(d => d._id);
+    const snapshots = await DoctorAvailabilitySnapshot.find({ doctorId: { $in: doctorIds } });
+    const snapshotMap = new Map(snapshots.map(s => [s.doctorId.toString(), s]));
+
     const filteredCandidates = [];
-    for (const doc of candidates) {
-      // Read pre-computed snapshot or recompute synchronously if older than 2 mins
-      const snapshot = await getOrRecomputeSnapshot(doc._id);
+    const now = new Date();
+
+    // Concurrently fetch/update snapshots that are missing or stale
+    const updatePromises = candidates.map(async (doc) => {
+      let snapshot = snapshotMap.get(doc._id.toString());
+      if (!snapshot) {
+        // Missing snapshot: compute synchronously once
+        snapshot = await updateDoctorAvailabilitySnapshot(doc._id);
+      } else if (now.getTime() - new Date(snapshot.lastComputedAt).getTime() > 120000) {
+        // Stale snapshot: run background update (do not block search response)
+        updateDoctorAvailabilitySnapshot(doc._id).catch(err => 
+          console.error("Background snapshot update failed:", err)
+        );
+      }
+      return { doc, snapshot };
+    });
+
+    const evaluated = await Promise.all(updatePromises);
+    for (const { doc, snapshot } of evaluated) {
       if (snapshot && snapshot.available) {
         filteredCandidates.push({ doctor: doc, snapshot });
       }
@@ -141,9 +163,11 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
             name: doctor.name,
             specialization: doctor.specialization,
             availabilityState: doctor.availabilityState,
+            status: doctor.status,
             rating: doctor.rating,
             experienceYears: doctor.experienceYears,
-            hospitalId: doctor.hospitalId
+            hospitalId: doctor.hospitalId?._id || doctor.hospitalId,
+            hospitalName: doctor.hospitalId?.name || "Partnered Hospital"
           },
           distance: distanceKm,
           fallbackScore: specRank * 1000 - (distanceKm || 999)
@@ -174,16 +198,18 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
           doctorId: doctor._id.toString(),
           recommended,
           why: ranking.why,
-          score: ranking.score, // internal use only for sorting/event snapshots
+          score: ranking.score,
           snapshot: ranking.snapshot,
           doctor: {
             _id: doctor._id,
             name: doctor.name,
             specialization: doctor.specialization,
             availabilityState: doctor.availabilityState,
+            status: doctor.status,
             rating: doctor.rating,
             experienceYears: doctor.experienceYears,
-            hospitalId: doctor.hospitalId
+            hospitalId: doctor.hospitalId?._id || doctor.hospitalId,
+            hospitalName: doctor.hospitalId?.name || "Partnered Hospital"
           },
           distance: ranking.distance
         };
@@ -201,7 +227,7 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
     // LOCK 23 Failure Fallback (Never 500)
     console.error("Search pipeline failed. Entering fallback mode:", error);
     mode = "fallback";
-    
+
     // Quick query of active doctors sorted by specialization -> distance -> availability
     const fallbackDocs = await getCandidateDoctors([]);
     results = fallbackDocs.map(doctor => {
@@ -226,7 +252,8 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
           availabilityState: doctor.availabilityState,
           rating: doctor.rating,
           experienceYears: doctor.experienceYears,
-          hospitalId: doctor.hospitalId
+          hospitalId: doctor.hospitalId?._id || doctor.hospitalId,
+          hospitalName: doctor.hospitalId?.name || "Partnered Hospital"
         },
         distance: distanceKm
       };

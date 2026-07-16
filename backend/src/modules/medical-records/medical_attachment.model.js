@@ -4,11 +4,26 @@ const medicalAttachmentSchema = new mongoose.Schema({
   recordId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "MedicalRecord",
-    required: true
+    default: null
   },
   version: {
     type: Number,
-    required: true
+    default: 1
+  },
+  clinicalNoteId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "ClinicalNote",
+    default: null
+  },
+  prescriptionId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Prescription",
+    default: null
+  },
+  reportId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Report",
+    default: null
   },
   storageKey: {
     type: String,
@@ -24,7 +39,7 @@ const medicalAttachmentSchema = new mongoose.Schema({
   },
   attachmentType: {
     type: String,
-    enum: ["image", "pdf", "lab_report", "prescription"],
+    enum: ["image", "pdf", "lab_report", "prescription", "scan", "clinical_note"],
     required: true
   },
   fileName: {
@@ -49,8 +64,6 @@ const medicalAttachmentSchema = new mongoose.Schema({
     default: null
   }
 }, { timestamps: true });
-
-medicalAttachmentSchema.index({ recordId: 1, version: 1, storageKey: 1 }, { unique: true });
 
 const MedicalAttachment = mongoose.model("MedicalAttachment", medicalAttachmentSchema);
 export default MedicalAttachment;

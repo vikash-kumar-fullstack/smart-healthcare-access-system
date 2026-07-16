@@ -43,8 +43,8 @@ export const requirePermission = (permission) => {
       const rolePermissions = {
         super_admin: ["full"],
         admin: ["full"],
-        district_admin: ["hospitals", "doctors", "reports"],
-        hospital_admin: ["local queues", "approvals"]
+        district_admin: ["hospitals", "doctors", "reports", "approvals"],
+        hospital_admin: ["local queues", "approvals", "doctors", "reports"]
       };
 
       const userPerms = rolePermissions[role] || [];

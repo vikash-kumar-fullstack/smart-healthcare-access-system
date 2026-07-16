@@ -17,7 +17,7 @@ export default function MedicalRecords() {
   const [diagnosisFilter, setDiagnosisFilter] = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [outcomeFilter, setOutcomeFilter] = useState("");
-  
+
   // Create Modal
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [newRecordData, setNewRecordData] = useState({
@@ -77,7 +77,7 @@ export default function MedicalRecords() {
     try {
       // Find matching patient users
       const response = await api.get(`/admin/users?role=patient`);
-      const filtered = response.data.data.users.filter(u => 
+      const filtered = response.data.data.users.filter(u =>
         u.name.toLowerCase().includes(patientSearchTerm.toLowerCase()) ||
         u.email?.toLowerCase().includes(patientSearchTerm.toLowerCase()) ||
         u.phone?.includes(patientSearchTerm)
@@ -203,9 +203,10 @@ export default function MedicalRecords() {
             />
             <button
               onClick={searchPatients}
+              disabled={searchLoading}
               className="px-5 py-2 bg-gray-800 hover:bg-gray-900 text-white font-semibold rounded-xl transition"
             >
-              Search
+              {searchLoading ? "Searching..." : "Search"}
             </button>
           </div>
           {patients.length > 0 && (
@@ -219,11 +220,10 @@ export default function MedicalRecords() {
                     setPatientSearchTerm(p.name);
                     toast.success(`Selected patient: ${p.name}`);
                   }}
-                  className={`p-3 text-left rounded-xl border transition ${
-                    selectedPatientId === p._id
+                  className={`p-3 text-left rounded-xl border transition ${selectedPatientId === p._id
                       ? "border-blue-600 bg-blue-50/20"
                       : "border-gray-100 hover:bg-gray-50"
-                  }`}
+                    }`}
                 >
                   <p className="font-bold text-sm text-gray-800">{p.name}</p>
                   <p className="text-xs text-gray-400 mt-0.5">{p.email || p.phone}</p>
@@ -308,13 +308,12 @@ export default function MedicalRecords() {
                     Created: {new Date(rec.createdAt).toLocaleDateString()}
                   </p>
                 </div>
-                <span className={`px-2.5 py-1 rounded-full text-xs font-bold capitalize ${
-                  rec.status === "locked"
+                <span className={`px-2.5 py-1 rounded-full text-xs font-bold capitalize ${rec.status === "locked"
                     ? "bg-red-50 text-red-600"
                     : rec.status === "archived"
-                    ? "bg-amber-50 text-amber-600"
-                    : "bg-green-50 text-green-600"
-                }`}>
+                      ? "bg-amber-50 text-amber-600"
+                      : "bg-green-50 text-green-600"
+                  }`}>
                   {rec.status}
                 </span>
               </div>

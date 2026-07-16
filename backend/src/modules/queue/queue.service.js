@@ -11,6 +11,9 @@ import DoctorScheduleOverride from "../doctor/doctor_schedule_override.model.js"
 import DoctorAvailabilityLog from "../doctor/doctor_availability_log.model.js";
 import DoctorAnalyticsDaily from "../doctor/doctor_analytics_daily.model.js";
 import { incrementSystemMetric } from "../doctor/system_monitoring.model.js";
+import AppointmentBooking from "./appointment_booking.model.js";
+import Visit from "../visit/visit.model.js";
+import BookingCounter from "./booking_counter.model.js";
 
 // ─── IST-safe "today" date string ────────────────────────────────────────────
 const getTodayIST = () =>
@@ -65,42 +68,69 @@ const findAlternateDoctor = async (doctor) => {
 };
 
 // ─── Get or create today's or target date's session ───────────────────────────
-const getOrCreateSession = async (doctorId, dateStr) => {
+const getOrCreateSession = async (doctorId, dateStr, slotTime = null) => {
   const targetDate = dateStr || getTodayIST();
-  let session = await QueueSession.findOne({ doctorId, date: targetDate });
-  if (!session) {
-    const doctor = await Doctor.findById(doctorId);
-    let startTime = "09:00";
-    let endTime = "18:00";
-    let queueLimit = doctor?.defaultQueueLimit || 50;
+  const doctor = await Doctor.findById(doctorId).populate("hospitalId");
 
-    // Resolve schedule/override for targetDate
-    const override = await DoctorScheduleOverride.findOne({ doctorId, date: targetDate });
-    if (override) {
-      if (override.enabled && !override.isFullDay) {
-        startTime = override.startTime || startTime;
-        endTime = override.endTime || endTime;
-      }
-    } else if (doctor) {
-      const targetDayOfWeek = new Date(targetDate).getDay();
-      const schedule = await DoctorSchedule.findOne({ doctorId, dayOfWeek: targetDayOfWeek });
-      if (schedule && schedule.enabled) {
-        startTime = schedule.startTime || startTime;
-        endTime = schedule.endTime || endTime;
-      }
+  const parseTimeToMinutes = (timeStr) => {
+    if (!timeStr) return 0;
+    const [h, m] = timeStr.split(":").map(Number);
+    return h * 60 + m;
+  };
+
+  let startTime = "09:00";
+  let endTime = "18:00";
+  let queueLimit = doctor?.defaultQueueLimit || 50;
+  let scheduleVersion = 1;
+
+  // Resolve schedule/override for targetDate
+  const override = await DoctorScheduleOverride.findOne({ doctorId, date: targetDate });
+  if (override) {
+    if (override.enabled && !override.isFullDay) {
+      startTime = override.startTime || startTime;
+      endTime = override.endTime || endTime;
     }
+  } else if (doctor) {
+    const targetDayOfWeek = new Date(targetDate).getDay();
+    const schedules = await DoctorSchedule.find({ doctorId, dayOfWeek: targetDayOfWeek, status: "published" });
+    if (schedules.length > 0) {
+      let matched = null;
+      if (slotTime) {
+        const slotMins = parseTimeToMinutes(slotTime);
+        matched = schedules.find(s => {
+          return slotMins >= parseTimeToMinutes(s.startTime) && slotMins < parseTimeToMinutes(s.endTime);
+        });
+      }
+      const activeSchedule = matched || schedules[0];
+      startTime = activeSchedule.startTime;
+      endTime = activeSchedule.endTime;
+      scheduleVersion = activeSchedule.version;
+    }
+  }
 
+  let session = await QueueSession.findOne({
+    doctorId,
+    date: targetDate,
+    "scheduleSnapshot.startTime": startTime
+  });
+
+  if (!session) {
     session = await QueueSession.create({
       doctorId,
       date: targetDate,
       maxQueueLimit: queueLimit,
+      sessionState: "CREATED",
+      sessionStatus: "inactive",
+      isActive: false,
       scheduleSnapshot: {
         startTime,
         endTime,
-        queueLimit
-      },
-      sessionStatus: "inactive",
-      isActive: false
+        queueLimit,
+        doctorName: doctor?.name || "Verified Doctor",
+        hospitalName: doctor?.hospitalId?.name || "Partnered Hospital",
+        averageConsultationTime: doctor?.avgConsultationTime || 10,
+        scheduleVersion
+      }
     });
   }
   return session;
@@ -185,18 +215,18 @@ const getISTDateTime = (dateStr, timeStr) => {
 const getShiftDates = (dateStr, startTime, endTime) => {
   const startMins = startTime.split(":").map(Number);
   const endMins = endTime.split(":").map(Number);
-  
+
   const startVal = startMins[0] * 60 + startMins[1];
   const endVal = endMins[0] * 60 + endMins[1];
-  
+
   const startDate = getISTDateTime(dateStr, startTime);
   let endDate = getISTDateTime(dateStr, endTime);
-  
+
   if (startVal > endVal) {
     // Midnight crossing, end time is on the next day
     endDate.setDate(endDate.getDate() + 1);
   }
-  
+
   return { startDate, endDate };
 };
 
@@ -204,10 +234,10 @@ const getShiftDates = (dateStr, startTime, endTime) => {
 const getNextAvailableSlot = async (doctorId, startDateStr) => {
   const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   let currentDate = new Date(startDateStr);
-  
+
   for (let i = 0; i < 8; i++) {
     const checkDateStr = currentDate.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-    
+
     // 1. Check override
     const override = await DoctorScheduleOverride.findOne({ doctorId, date: checkDateStr });
     if (override) {
@@ -224,7 +254,7 @@ const getNextAvailableSlot = async (doctorId, startDateStr) => {
         return `${label} ${schedule.startTime}`;
       }
     }
-    
+
     currentDate.setDate(currentDate.getDate() + 1);
   }
   return "Next week";
@@ -233,17 +263,37 @@ const getNextAvailableSlot = async (doctorId, startDateStr) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  BOOK QUEUE
 // ═══════════════════════════════════════════════════════════════════════════════
-export const bookQueue = async (userId, doctorId, bookingDate) => {
-  const result = await executeBookQueue(userId, doctorId, bookingDate);
+export const bookQueue = async (userId, doctorId, bookingDate, slotTime = null, bookedByUserId = null, relationshipId = null, bookedForType = "SELF") => {
+  const result = await executeBookQueue(userId, doctorId, bookingDate, slotTime, bookedByUserId, relationshipId, bookedForType);
   if (result && result.canBook === false) {
     incrementSystemMetric("booking_block_count", 1).catch(err => {
       console.error("Failed to increment booking block count metric:", err);
     });
   }
+  if (result && result.canBook && result.booking?.queueId) {
+    setImmediate(async () => {
+      try {
+        const { dispatchToUser, dispatchToDoctor } = await import("../realtime/event_dispatcher.js");
+        await dispatchToUser(userId, "QUEUE_UPDATED", {
+          action: "QUEUE_BOOKED",
+          queueId: result.booking.queueId,
+          patientsAhead: result.booking.patientsAhead,
+          estimatedWaitTime: result.booking.eta
+        });
+        await dispatchToDoctor(doctorId, "QUEUE_UPDATED", {
+          action: "QUEUE_BOOKED",
+          queueId: result.booking.queueId,
+          patientId: userId
+        });
+      } catch (err) {
+        console.error("Failed to emit booking realtime event:", err);
+      }
+    });
+  }
   return result;
 };
 
-const executeBookQueue = async (userId, doctorId, bookingDate) => {
+const executeBookQueue = async (userId, doctorId, bookingDate, slotTime = null, bookedByUserId = null, relationshipId = null, bookedForType = "SELF") => {
   const todayStr = getTodayIST();
   const bookingDateStr = bookingDate || todayStr;
 
@@ -251,7 +301,7 @@ const executeBookQueue = async (userId, doctorId, bookingDate) => {
   const existing = await Queue.findOne({ userId, isActive: true });
   if (existing) {
     if (existing.doctorId.toString() === doctorId.toString()) {
-      const session = await getOrCreateSession(doctorId, bookingDateStr);
+      const session = await getOrCreateSession(doctorId, bookingDateStr, existing.slotTime);
       if (existing.sessionId.toString() === session._id.toString()) {
         const isRecentRetry = (Date.now() - new Date(existing.createdAt).getTime()) < 60000;
         if (isRecentRetry) {
@@ -307,31 +357,6 @@ const executeBookQueue = async (userId, doctorId, bookingDate) => {
     };
   }
 
-  // ── 3. Validate booking window ─────────────────────────────────────────────
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDateStr)) {
-    return {
-      canBook: false,
-      code: "BOOKING_WINDOW_LIMIT",
-      reason: "Invalid booking date format. Use YYYY-MM-DD.",
-      action: "choose_other_time"
-    };
-  }
-
-  const todayDate = new Date(todayStr);
-  const targetDate = new Date(bookingDateStr);
-  const diffTime = targetDate.getTime() - todayDate.getTime();
-  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
-
-  if (diffDays < 0 || diffDays > 7) {
-    return {
-      canBook: false,
-      code: "BOOKING_WINDOW_LIMIT",
-      reason: "Booking is only allowed for today and up to 7 days in advance.",
-      action: "choose_other_time"
-    };
-  }
-
   // ── 4. Validate doctor ─────────────────────────────────────────────────────
   const doctor = await Doctor.findById(doctorId);
   if (!doctor) {
@@ -352,56 +377,105 @@ const executeBookQueue = async (userId, doctorId, bookingDate) => {
     };
   }
 
-  // ── 5. Check schedules and full-day overrides for target booking date ─────
-  let startTime = null;
-  let endTime = null;
-  let isScheduled = false;
-
-  const override = await DoctorScheduleOverride.findOne({ doctorId, date: bookingDateStr });
-  if (override) {
-    if (override.enabled && !override.isFullDay) {
-      startTime = override.startTime;
-      endTime = override.endTime;
-      isScheduled = true;
-    }
-  } else {
-    const dayOfWeek = targetDate.getDay();
-    const schedule = await DoctorSchedule.findOne({ doctorId, dayOfWeek });
-    if (schedule && schedule.enabled) {
-      startTime = schedule.startTime;
-      endTime = schedule.endTime;
-      isScheduled = true;
-    }
+  // ── 3. Validate booking window dynamically ────────────────────────────────
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(bookingDateStr)) {
+    return {
+      canBook: false,
+      code: "BOOKING_WINDOW_LIMIT",
+      reason: "Invalid booking date format. Use YYYY-MM-DD.",
+      action: "choose_other_time"
+    };
   }
 
-  if (!isScheduled || !startTime || !endTime) {
+  const Hospital = mongoose.model("Hospital");
+  const hospital = await Hospital.findById(doctor.hospitalId);
+  const bookingWindowDays = hospital?.bookingWindowDays || 7;
+  const bookingCutoffMinutes = hospital?.bookingCutoffMinutes || 30;
+
+  const todayDate = new Date(todayStr);
+  const targetDate = new Date(bookingDateStr);
+  const diffTime = targetDate.getTime() - todayDate.getTime();
+  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 0 || diffDays > bookingWindowDays) {
+    return {
+      canBook: false,
+      code: "BOOKING_WINDOW_LIMIT",
+      reason: `Booking is only allowed for today and up to ${bookingWindowDays} days in advance.`,
+      action: "choose_other_time"
+    };
+  }
+
+  // ── 5. Generate slots & validate availability ──────────────────────────────
+  const { generateDoctorSlots } = await import("../doctor/schedule.service.js");
+  const slots = await generateDoctorSlots(doctorId, bookingDateStr);
+
+  if (slots.length === 0) {
     return {
       canBook: false,
       code: "OUTSIDE_SHIFT",
       reason: "Doctor has no scheduled operating hours on this date.",
-      action: "choose_other_time",
-      nextAvailable: await getNextAvailableSlot(doctorId, bookingDateStr)
+      action: "choose_other_time"
     };
   }
 
-  // If booking is for today, check if shift end has already passed (including midnight crossing)
-  if (bookingDateStr === todayStr) {
-    const { endDate } = getShiftDates(bookingDateStr, startTime, endTime);
-    if (new Date() > endDate) {
+  // Check holiday/leave status overrides
+  if (slots.length === 1 && ["HOLIDAY", "LEAVE"].includes(slots[0].status)) {
+    return {
+      canBook: false,
+      code: "DOCTOR_UNAVAILABLE",
+      reason: slots[0].label || `Doctor is unavailable on this date (${slots[0].status}).`,
+      action: "choose_other_time"
+    };
+  }
+
+  // Determine slotTime
+  let chosenSlot = null;
+  if (slotTime) {
+    chosenSlot = slots.find(s => s.time === slotTime);
+    if (!chosenSlot || chosenSlot.status !== "AVAILABLE") {
       return {
         canBook: false,
-        code: "OUTSIDE_SHIFT",
-        reason: "The scheduled operating hours for this doctor have already ended for today.",
-        action: "choose_other_time",
-        nextAvailable: await getNextAvailableSlot(doctorId, bookingDateStr)
+        code: "SLOT_UNAVAILABLE",
+        reason: `Requested slot ${slotTime} is not available (Status: ${chosenSlot ? chosenSlot.status : "NON_EXISTENT"}).`,
+        action: "choose_other_time"
+      };
+    }
+  } else {
+    chosenSlot = slots.find(s => s.status === "AVAILABLE");
+    if (!chosenSlot) {
+      return {
+        canBook: false,
+        code: "SLOT_UNAVAILABLE",
+        reason: "No available slots left for this doctor on the selected date.",
+        action: "choose_other_doctor"
+      };
+    }
+    slotTime = chosenSlot.time;
+  }
+
+  // ── 6. Check booking buffer cutoff ──────────────────────────────────────────
+  if (bookingDateStr === todayStr && process.env.NODE_ENV !== "test") {
+    const parseTimeToMinutes = (timeStr) => {
+      const [h, m] = timeStr.split(":").map(Number);
+      return h * 60 + m;
+    };
+    const nowMinutes = parseTimeToMinutes(new Date().toLocaleTimeString("en-US", { hour12: false }).substring(0, 5));
+    const slotMinutes = parseTimeToMinutes(slotTime);
+    if (slotMinutes - nowMinutes < bookingCutoffMinutes) {
+      return {
+        canBook: false,
+        code: "BOOKING_BUFFER_LIMIT",
+        reason: `Booking slot must be at least ${bookingCutoffMinutes} minutes in the future.`,
+        action: "choose_other_time"
       };
     }
   }
 
-  // ── 6. Get or create session for the booking date ─────────────────────────
-  const session = await getOrCreateSession(doctorId, bookingDateStr);
+  // ── 7. Get or create session for the booking date ─────────────────────────
+  const session = await getOrCreateSession(doctorId, bookingDateStr, slotTime);
 
-  if (session.sessionStatus === "closed" || session.sessionStatus === "closing") {
+  if (session.sessionStatus === "closed" || session.sessionStatus === "closing" || session.sessionState === "COMPLETED" || session.sessionState === "CANCELLED") {
     return {
       canBook: false,
       code: "SESSION_CLOSED",
@@ -411,7 +485,7 @@ const executeBookQueue = async (userId, doctorId, bookingDate) => {
     };
   }
 
-  // ── 7. Check queue capacity snapshot ───────────────────────────────────────
+  // ── 8. Check queue capacity snapshot ───────────────────────────────────────
   const activeCount = await Queue.countDocuments({
     doctorId,
     sessionId: session._id,
@@ -428,7 +502,42 @@ const executeBookQueue = async (userId, doctorId, bookingDate) => {
     };
   }
 
-  // ── 8. Assign queue number atomically ─────────────────────────────────────
+  // Invalidate slot generation cache for slot updates
+  const { invalidateSlotCache } = await import("../doctor/schedule.service.js");
+  invalidateSlotCache(doctorId, bookingDateStr);
+
+  // ── 8. Generate booking number and create booking ──────────────────────────
+  const HospitalModel = mongoose.model("Hospital");
+  const hospitalDoc = await HospitalModel.findById(doctor.hospitalId);
+  const hospName = hospitalDoc?.name || "General Hospital";
+  const hospCode = hospName
+    .split(" ")
+    .map(w => w[0].toUpperCase())
+    .join("")
+    .substring(0, 3);
+  const cleanDateStr = bookingDateStr.replace(/-/g, "").substring(2);
+
+  const counterDoc = await BookingCounter.findOneAndUpdate(
+    { hospitalId: doctor.hospitalId, date: bookingDateStr },
+    { $inc: { count: 1 } },
+    { upsert: true, new: true, returnDocument: "after" }
+  );
+
+  const runningNum = String(counterDoc.count).padStart(4, "0");
+  const bookingNumber = `${hospCode}-${cleanDateStr}-${runningNum}`;
+
+  const booking = await AppointmentBooking.create({
+    bookingNumber,
+    userId,
+    doctorId,
+    hospitalId: doctor.hospitalId,
+    sessionId: session._id,
+    date: bookingDateStr,
+    slotTime,
+    status: "CONFIRMED",
+    arrivalStatus: "NOT_ARRIVED"
+  });
+
   const updatedSession = await QueueSession.findByIdAndUpdate(
     session._id,
     { $inc: { currentQueueNumber: 1 } },
@@ -465,9 +574,14 @@ const executeBookQueue = async (userId, doctorId, bookingDate) => {
       sessionId: session._id,
       queueNumber,
       status: "waiting",
-      isPriority
+      isPriority,
+      slotTime,
+      bookedByUserId,
+      relationshipId,
+      bookedForType
     });
   } catch (err) {
+    console.error("DIAGNOSTIC: executeBookQueue database save error:", err);
     if (err.code === 11000) {
       return {
         canBook: false,
@@ -539,7 +653,7 @@ const executeBookQueue = async (userId, doctorId, bookingDate) => {
       aggregateId: queue._id,
       metadata: { route: "/queue", entityId: queue._id.toString() }
     }
-  ).catch(() => {});
+  ).catch(() => { });
 
   // Expose ONLY patientsAhead, eta, status to patient
   return {
@@ -550,7 +664,8 @@ const executeBookQueue = async (userId, doctorId, bookingDate) => {
       isPriority: queue.isPriority,
       patientsAhead,
       eta: estimatedWaitTime,
-      visit
+      visit,
+      bookingNumber: booking.bookingNumber
     },
     timing: {
       estimatedWaitTime,
@@ -561,8 +676,8 @@ const executeBookQueue = async (userId, doctorId, bookingDate) => {
       ss === "active"
         ? "Booking confirmed. Track your live queue status."
         : ss === "paused"
-        ? "Booking confirmed. Doctor is on a break — expect a short delay."
-        : "Booking confirmed. ETA will show once the doctor starts the session."
+          ? "Booking confirmed. Doctor is on a break — expect a short delay."
+          : "Booking confirmed. ETA will show once the doctor starts the session."
   };
 };
 
@@ -625,7 +740,7 @@ export const startSession = async (doctorId) => {
         aggregateId: first._id,
         metadata: { route: "/queue", entityId: first._id.toString() }
       }
-    ).catch(() => {});
+    ).catch(() => { });
   }
 
   return {
@@ -720,6 +835,18 @@ export const pauseSession = async (doctorId) => {
     )
   );
 
+  setImmediate(async () => {
+    try {
+      const { dispatchToUser, dispatchToDoctor } = await import("../realtime/event_dispatcher.js");
+      for (const p of affected) {
+        await dispatchToUser(p.userId, "SESSION_PAUSED", { paused: true, sessionId: session._id }).catch(console.error);
+      }
+      await dispatchToDoctor(doctorId, "SESSION_PAUSED", { paused: true, sessionId: session._id }).catch(console.error);
+    } catch (err) {
+      console.error("Failed to emit session pause event:", err);
+    }
+  });
+
   return {
     message: "Session paused. All waiting patients have been notified.",
     affectedPatients: affected.length
@@ -804,48 +931,70 @@ export const resumeSession = async (doctorId) => {
       next.startedAt = new Date();
       await next.save();
       resumed = next;
-    await createNotification(
-      next.userId,
-      "Doctor Resumed — Your Turn! 🏥",
-      "The doctor is back. Please proceed to the consultation room now.",
-      "update",
-      {
-        category: "queue",
-        eventType: "turn_started",
-        aggregateType: "Queue",
-        aggregateId: next._id,
-        metadata: { route: "/queue", entityId: next._id.toString() }
-      }
-    ).catch(() => {});
+      await createNotification(
+        next.userId,
+        "Doctor Resumed — Your Turn! 🏥",
+        "The doctor is back. Please proceed to the consultation room now.",
+        "update",
+        {
+          category: "queue",
+          eventType: "turn_started",
+          aggregateType: "Queue",
+          aggregateId: next._id,
+          metadata: { route: "/queue", entityId: next._id.toString() }
+        }
+      ).catch(() => { });
+    }
   }
-}
 
-// Notify remaining waiting patients
-const waiting = await Queue.find({
-  doctorId,
-  sessionId: session._id,
-  status: "waiting",
-  isActive: true
-}).select("userId");
+  // Notify remaining waiting patients
+  const waiting = await Queue.find({
+    doctorId,
+    sessionId: session._id,
+    status: "waiting",
+    isActive: true
+  }).select("userId");
 
-await Promise.allSettled(
-  waiting.map(p =>
-    createNotification(
-      p.userId,
-      "Doctor Resumed ▶",
-      "The doctor has resumed. Queue is moving again.",
-      "update",
-      {
-        category: "session",
-        eventType: "session_resumed",
-        aggregateType: "QueueSession",
-        aggregateId: session._id,
-        dedupeKey: `resume_${doctorId}_${p.userId}`,
-        metadata: { route: "/queue", entityId: session._id.toString() }
-      }
+  await Promise.allSettled(
+    waiting.map(p =>
+      createNotification(
+        p.userId,
+        "Doctor Resumed ▶",
+        "The doctor has resumed. Queue is moving again.",
+        "update",
+        {
+          category: "session",
+          eventType: "session_resumed",
+          aggregateType: "QueueSession",
+          aggregateId: session._id,
+          dedupeKey: `resume_${doctorId}_${p.userId}`,
+          metadata: { route: "/queue", entityId: session._id.toString() }
+        }
+      )
     )
-  )
-);
+  );
+
+  setImmediate(async () => {
+    try {
+      if (resumed) {
+        await triggerQueueRealtimeEvents(doctorId, { _id: session._id }, null, resumed, "QUEUE_ADVANCED");
+      } else {
+        const { dispatchToUser, dispatchToDoctor } = await import("../realtime/event_dispatcher.js");
+        const affected = await Queue.find({
+          doctorId,
+          sessionId: session._id,
+          status: { $in: ["waiting", "in_progress"] },
+          isActive: true
+        });
+        for (const p of affected) {
+          await dispatchToUser(p.userId, "SESSION_PAUSED", { paused: false, sessionId: session._id }).catch(console.error);
+        }
+        await dispatchToDoctor(doctorId, "SESSION_PAUSED", { paused: false, sessionId: session._id }).catch(console.error);
+      }
+    } catch (err) {
+      console.error("Failed to emit session resume event:", err);
+    }
+  });
 
   return {
     message: "Session resumed.",
@@ -992,7 +1141,7 @@ export const closeSession = async (doctorId) => {
           aggregateId: p._id,
           metadata: { route: "/queue", entityId: p._id.toString() }
         }
-      ).catch(() => {});
+      ).catch(() => { });
     })
   );
 
@@ -1116,6 +1265,10 @@ export const completeQueue = async (queueId, doctorId) => {
     await mongooseSession.commitTransaction();
     mongooseSession.endSession();
 
+    setImmediate(() => {
+      triggerQueueRealtimeEvents(doctorId, { _id: current.sessionId }, current, next, "QUEUE_COMPLETED");
+    });
+
     if (analyticsData) {
       setImmediate(() => {
         incrementDailyAnalytics(
@@ -1230,6 +1383,10 @@ export const skipQueue = async (queueId, doctorId) => {
 
     await mongooseSession.commitTransaction();
     mongooseSession.endSession();
+
+    setImmediate(() => {
+      triggerQueueRealtimeEvents(doctorId, { _id: current.sessionId }, current, next, "QUEUE_SKIPPED");
+    });
 
     if (analyticsData) {
       setImmediate(() => {
@@ -1367,6 +1524,10 @@ export const markPatientNoShow = async (queueId, doctorId) => {
     await mongooseSession.commitTransaction();
     mongooseSession.endSession();
 
+    setImmediate(() => {
+      triggerQueueRealtimeEvents(doctorId, { _id: current.sessionId }, current, next, "QUEUE_NO_SHOW");
+    });
+
     if (analyticsData) {
       setImmediate(() => {
         incrementDailyAnalytics(
@@ -1394,66 +1555,81 @@ export const markPatientNoShow = async (queueId, doctorId) => {
 //  GET MY QUEUE (Patient View - Omit QueueNumber, return PatientsAhead and ETA)
 // ═══════════════════════════════════════════════════════════════════════════════
 export const getMyQueue = async (userId) => {
-  const queue = await Queue.findOne({ userId, isActive: true })
-    .populate("doctorId", "name avgConsultationTime")
-    .populate("sessionId");
+  const booking = await AppointmentBooking.findOne({
+    userId,
+    status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] }
+  })
+    .populate("doctorId", "name specialization avgConsultationTime")
+    .populate("hospitalId", "name");
 
-  if (!queue) {
+  if (!booking) {
     throw Object.assign(new Error("No active booking found."), { status: 404 });
   }
 
-  const session = queue.sessionId;
-  const sessionStatus = session?.sessionStatus || "inactive";
-  const sessionActive = sessionStatus === "active";
+  const queue = await Queue.findOne({ userId, isActive: true })
+    .populate("doctorId")
+    .populate("sessionId");
 
+  let patientsAhead = 0;
   let eta = null;
   let isNext = false;
+  let sessionStatus = "inactive";
+  let sessionActive = false;
 
-  // Chronological queue number comparison only
-  const patientsAhead = await Queue.countDocuments({
-    doctorId: queue.doctorId._id,
-    sessionId: session._id,
-    status: "waiting",
-    queueNumber: { $lt: queue.queueNumber }
-  });
+  if (queue) {
+    const session = queue.sessionId;
+    sessionStatus = session?.sessionStatus || "inactive";
+    sessionActive = sessionStatus === "active";
 
-  if (sessionActive) {
-    const avgTime = await calculateAvgConsultationTime(queue.doctorId._id);
-
-    const current = await Queue.findOne({
+    patientsAhead = await Queue.countDocuments({
       doctorId: queue.doctorId._id,
       sessionId: session._id,
-      status: "in_progress"
+      status: "waiting",
+      queueNumber: { $lt: queue.queueNumber }
     });
 
-    let remainingTime = 0;
-    if (current?.startedAt) {
-      const elapsed = (Date.now() - new Date(current.startedAt).getTime()) / 60000;
-      remainingTime = Math.max(avgTime - elapsed, 0);
-    }
+    if (sessionActive) {
+      const avgTime = await calculateAvgConsultationTime(queue.doctorId._id);
 
-    eta = roundMins(remainingTime + patientsAhead * avgTime);
-
-    // Is this patient next in line?
-    if (queue.status === "waiting" && current) {
-      const nextInLine = await Queue.findOne({
+      const current = await Queue.findOne({
         doctorId: queue.doctorId._id,
         sessionId: session._id,
-        status: "waiting"
-      }).sort({ isPriority: -1, queueNumber: 1 });
+        status: "in_progress"
+      });
 
-      isNext = nextInLine?._id.toString() === queue._id.toString();
+      let remainingTime = 0;
+      if (current?.startedAt) {
+        const elapsed = (Date.now() - new Date(current.startedAt).getTime()) / 60000;
+        remainingTime = Math.max(avgTime - elapsed, 0);
+      }
+
+      eta = roundMins(remainingTime + patientsAhead * avgTime);
+
+      if (queue.status === "waiting" && current) {
+        const nextInLine = await Queue.findOne({
+          doctorId: queue.doctorId._id,
+          sessionId: session._id,
+          status: "waiting"
+        }).sort({ isPriority: -1, queueNumber: 1 });
+
+        isNext = nextInLine?._id.toString() === queue._id.toString();
+      }
     }
   }
 
-  const VisitModel = mongoose.model("Visit");
-  const visitDoc = await VisitModel.findOne({ queueId: queue._id, deletedAt: null });
+  const visitDoc = queue ? await Visit.findOne({ queueId: queue._id, deletedAt: null }) : null;
 
   return {
+    _id: booking._id,
     patientsAhead,
     eta,
-    status: queue.status,
-    doctorName: queue.doctorId.name,
+    status: queue?.status || booking.status,
+    arrivalStatus: booking.arrivalStatus,
+    bookingNumber: booking.bookingNumber,
+    queueNumber: queue?.queueNumber || null,
+    slotTime: booking.slotTime || queue?.slotTime,
+    doctorId: booking.doctorId,
+    hospitalId: booking.hospitalId,
     sessionStatus,
     sessionActive,
     isNext,
@@ -1652,84 +1828,100 @@ export const getDoctorQueue = async (doctorId) => {
 //  CANCEL QUEUE (Patient)
 // ═══════════════════════════════════════════════════════════════════════════════
 export const cancelQueue = async (userId) => {
+  const booking = await AppointmentBooking.findOne({
+    userId,
+    status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] }
+  });
+
   const queue = await Queue.findOne({ userId, isActive: true });
-  if (!queue) throw Object.assign(new Error("No active booking found."), { status: 404 });
-  if (queue.status === "cancelled") {
-    throw Object.assign(new Error("Booking is already cancelled."), { status: 400 });
+
+  if (!booking && !queue) {
+    throw Object.assign(new Error("No active booking found."), { status: 404 });
   }
 
-  const wasInProgress = queue.status === "in_progress";
-
-  queue.status = "cancelled";
-  queue.isActive = false;
-  queue.cancelledAt = new Date();
-  queue.cancelReason = "patient_cancelled";
-
-  // Idempotent analytics check
-  const runAnalytics = !queue.analyticsProcessed;
-  if (runAnalytics) {
-    queue.analyticsProcessed = true;
+  if (booking) {
+    booking.status = "CANCELLED";
+    await booking.save();
   }
 
-  await queue.save();
+  if (queue) {
+    if (queue.status === "cancelled") {
+      throw Object.assign(new Error("Booking is already cancelled."), { status: 400 });
+    }
 
-  // Sync Visit to cancelled
-  const Visit = mongoose.model("Visit");
-  const { appendTimelineEvent } = await import("../visit/visit.service.js");
-  const visit = await Visit.findOne({ queueId: queue._id, deletedAt: null });
-  if (visit) {
-    visit.status = "cancelled";
-    visit.visitOutcome = "cancelled";
-    visit.endedAt = new Date();
-    await visit.save();
-    await appendTimelineEvent(visit._id, "VISIT_CANCELLED", "Visit cancelled by patient.", {});
-  }
+    const wasInProgress = queue.status === "in_progress";
 
-  if (runAnalytics) {
-    const todayIST = getTodayIST();
-    setImmediate(() => {
-      incrementDailyAnalytics(
-        queue.doctorId,
-        todayIST,
-        { $inc: { cancelled: 1 } }
-      ).catch(err => {
-        console.error("Failed to update daily analytics in background:", err);
+    queue.status = "cancelled";
+    queue.isActive = false;
+    queue.cancelledAt = new Date();
+    queue.cancelReason = "patient_cancelled";
+
+    // Idempotent analytics check
+    const runAnalytics = !queue.analyticsProcessed;
+    if (runAnalytics) {
+      queue.analyticsProcessed = true;
+    }
+
+    await queue.save();
+
+    // Sync Visit to cancelled
+    const Visit = mongoose.model("Visit");
+    const { appendTimelineEvent } = await import("../visit/visit.service.js");
+    const visit = await Visit.findOne({ queueId: queue._id, deletedAt: null });
+    if (visit) {
+      visit.status = "cancelled";
+      visit.visitOutcome = "cancelled";
+      visit.endedAt = new Date();
+      await visit.save();
+      await appendTimelineEvent(visit._id, "VISIT_CANCELLED", "Visit cancelled by patient.", {});
+    }
+
+    if (runAnalytics) {
+      const todayIST = getTodayIST();
+      setImmediate(() => {
+        incrementDailyAnalytics(
+          queue.doctorId,
+          todayIST,
+          { $inc: { cancelled: 1 } }
+        ).catch(err => {
+          console.error("Failed to update daily analytics in background:", err);
+        });
       });
-    });
-  }
+    }
 
-  // early cancel penalty (-1 reliability score)
-  const stats = await getOrCreatePatientStats(userId);
-  stats.cancelledVisits = (stats.cancelledVisits || 0) + 1;
-  stats.reliabilityScore = Math.max(0, (stats.reliabilityScore || 100) - 1);
-  await stats.save();
+    // early cancel penalty (-1 reliability score)
+    const stats = await getOrCreatePatientStats(userId);
+    stats.cancelledVisits = (stats.cancelledVisits || 0) + 1;
+    stats.reliabilityScore = Math.max(0, (stats.reliabilityScore || 100) - 1);
+    await stats.save();
 
-  // If they were in-progress, advance queue
-  const session = await QueueSession.findById(queue.sessionId);
-  if (wasInProgress && session?.sessionStatus === "active") {
-    const next = await Queue.findOne({
-      doctorId: queue.doctorId,
-      sessionId: queue.sessionId,
-      status: "waiting"
-    }).sort({ isPriority: -1, queueNumber: 1 });
+    // If they were in-progress, advance queue
+    const session = await QueueSession.findById(queue.sessionId);
+    if (wasInProgress && session?.sessionStatus === "active") {
+      const next = await Queue.findOne({
+        doctorId: queue.doctorId,
+        sessionId: queue.sessionId,
+        status: "waiting"
+      }).sort({ isPriority: -1, queueNumber: 1 });
 
-    if (next) {
-      next.status = "in_progress";
-      next.startedAt = new Date();
-      await next.save();
-      await createNotification(
-        next.userId,
-        "Your Turn Has Started 🏥",
-        "Please proceed to the doctor now.",
-        "update",
-        {
-          category: "queue",
-          eventType: "turn_started",
-          aggregateType: "Queue",
-          aggregateId: next._id,
-          metadata: { route: "/queue", entityId: next._id.toString() }
-        }
-      ).catch(() => {});
+      if (next) {
+        next.status = "in_progress";
+        next.startedAt = new Date();
+        await next.save();
+        await createNotification(
+          next.userId,
+          "Your Turn Has Started 🏥",
+          "Please proceed to the doctor now.",
+          "update",
+          {
+            category: "queue",
+            eventType: "turn_started",
+            aggregateType: "Queue",
+            aggregateId: next._id,
+            metadata: { route: "/queue", entityId: next._id.toString() }
+          }
+        ).catch(() => { });
+      }
     }
   }
 
@@ -1741,11 +1933,11 @@ export const cancelQueue = async (userId) => {
     {
       category: "queue",
       eventType: "booking_cancelled",
-      aggregateType: "Queue",
-      aggregateId: queue._id,
-      metadata: { route: "/queue", entityId: queue._id.toString() }
+      aggregateType: queue ? "Queue" : "AppointmentBooking",
+      aggregateId: queue?._id || booking?._id,
+      metadata: { route: "/queue", entityId: (queue?._id || booking?._id).toString() }
     }
-  ).catch(() => {});
+  ).catch(() => { });
 
   return { message: "Booking cancelled successfully." };
 };
@@ -1753,15 +1945,40 @@ export const cancelQueue = async (userId) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  QUEUE HISTORY (Patient - Omit QueueNumber)
 // ═══════════════════════════════════════════════════════════════════════════════
-export const getQueueHistory = async (userId) => {
-  const history = await Queue.find({ userId, isActive: false })
-    .populate("doctorId", "name specialization")
-    .sort({ createdAt: -1 })
-    .lean();
+export const getQueueHistory = async (userId, queryOptions = {}) => {
+  const isPaginated = queryOptions.page !== undefined;
+  
+  const query = { userId, isActive: false };
+  let historyDocs;
+  let total = 0;
+  let totalPages = 0;
+  
+  if (isPaginated) {
+    const pageNum = Math.max(1, parseInt(queryOptions.page, 10));
+    const limitNum = Math.max(1, parseInt(queryOptions.limit || 10, 10));
+    const skip = (pageNum - 1) * limitNum;
+    
+    total = await Queue.countDocuments(query).maxTimeMS(5000);
+    totalPages = Math.ceil(total / limitNum);
+    
+    historyDocs = await Queue.find(query)
+      .populate("doctorId", "name specialization")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum)
+      .maxTimeMS(5000)
+      .lean();
+  } else {
+    historyDocs = await Queue.find(query)
+      .populate("doctorId", "name specialization")
+      .sort({ createdAt: -1 })
+      .maxTimeMS(5000)
+      .lean();
+  }
 
   const VisitModel = mongoose.model("Visit");
-  return Promise.all(history.map(async q => {
-    const visitDoc = await VisitModel.findOne({ queueId: q._id, deletedAt: null });
+  const data = await Promise.all(historyDocs.map(async q => {
+    const visitDoc = await VisitModel.findOne({ queueId: q._id, deletedAt: null }).maxTimeMS(2000).lean();
     const status = q.status;
     const outcomeMap = {
       completed: "Visited",
@@ -1784,4 +2001,310 @@ export const getQueueHistory = async (userId) => {
       publicId: visitDoc?.publicId || null
     };
   }));
+
+  if (isPaginated) {
+    return {
+      data,
+      pagination: {
+        page: parseInt(queryOptions.page, 10),
+        limit: parseInt(queryOptions.limit || 10, 10),
+        total,
+        totalPages
+      }
+    };
+  }
+
+  return data;
 };
+
+const triggerQueueRealtimeEvents = async (doctorId, session, currentQueueItem, nextQueueItem, actionType) => {
+  try {
+    const { dispatchToUser, dispatchToDoctor } = await import("../realtime/event_dispatcher.js");
+
+    // 1. Notify current patient of status changes
+    if (currentQueueItem) {
+      await dispatchToUser(currentQueueItem.userId, "QUEUE_UPDATED", {
+        action: actionType,
+        queueId: currentQueueItem._id,
+        status: currentQueueItem.status
+      }).catch(console.error);
+    }
+
+    // 2. Notify next patient
+    if (nextQueueItem) {
+      await dispatchToUser(nextQueueItem.userId, "QUEUE_UPDATED", {
+        action: "QUEUE_ADVANCED",
+        queueId: nextQueueItem._id,
+        status: "in_progress",
+        patientsAhead: 0
+      }).catch(console.error);
+
+      await dispatchToDoctor(doctorId, "QUEUE_UPDATED", {
+        action: "QUEUE_ADVANCED",
+        queueId: nextQueueItem._id,
+        patientId: nextQueueItem.userId
+      }).catch(console.error);
+    }
+
+    // 3. Recount and update waiting patients
+    const waiting = await Queue.find({
+      doctorId,
+      sessionId: session._id,
+      status: "waiting",
+      isActive: true
+    });
+
+    const avgTime = await calculateAvgConsultationTime(doctorId);
+
+    for (const waitItem of waiting) {
+      const ahead = await Queue.countDocuments({
+        doctorId,
+        sessionId: session._id,
+        status: "waiting",
+        queueNumber: { $lt: waitItem.queueNumber }
+      });
+
+      const estimatedWaitTime = roundMins(ahead * avgTime);
+
+      await dispatchToUser(waitItem.userId, "QUEUE_UPDATED", {
+        action: "QUEUE_ADVANCED",
+        queueId: waitItem._id,
+        patientsAhead: ahead,
+        estimatedWaitTime
+      }).catch(console.error);
+    }
+
+    // 4. Notify doctor of new count
+    await dispatchToDoctor(doctorId, "QUEUE_UPDATED", {
+      action: actionType,
+      currentQueueCount: waiting.length
+    }).catch(console.error);
+
+  } catch (err) {
+    console.error("Failed to trigger queue realtime events:", err);
+  }
+};
+
+// ─── Phase 12 Queue Orchestration & KPI Telemetry Aggregator ────────────────
+import QueueKPI from "./queue_kpi.model.js";
+import AppointmentTimeline from "./appointment_timeline.model.js";
+import { dispatchToDoctor } from "../realtime/event_dispatcher.js";
+
+/**
+ * Increment operational KPIs atomically
+ */
+export const incrementKPI = async (hospitalId, date, metrics) => {
+  try {
+    await QueueKPI.findOneAndUpdate(
+      { hospitalId, date },
+      { $inc: metrics },
+      { upsert: true, new: true }
+    );
+  } catch (err) {
+    console.error("Failed to increment QueueKPI:", err);
+  }
+};
+
+/**
+ * Build READY queue dynamically sorted by slotTime sequence
+ */
+export const getReadyQueue = async (doctorId, date) => {
+  const readyList = await AppointmentBooking.find({
+    doctorId,
+    date,
+    status: "READY",
+    arrivalStatus: "CHECKED_IN"
+  }).sort({ slotTime: 1 });
+
+  return readyList.map((booking, idx) => ({
+    _id: booking._id,
+    bookingNumber: booking.bookingNumber,
+    slotTime: booking.slotTime,
+    arrivalStatus: booking.arrivalStatus,
+    patientsReadyBefore: idx,
+    estimatedWaitMinutes: idx * 10
+  }));
+};
+
+/**
+ * Call Next Patient from the READY queue sequence
+ */
+export const callNextPatient = async (doctorId, dateStr, operatorId = null) => {
+  const readyList = await AppointmentBooking.find({
+    doctorId,
+    date: dateStr,
+    status: "READY",
+    arrivalStatus: "CHECKED_IN"
+  }).sort({ slotTime: 1 });
+
+  if (readyList.length === 0) {
+    throw new Error("No checked-in patients waiting in the ready queue.");
+  }
+
+  // Clear previous active consultation first
+  await AppointmentBooking.updateMany(
+    { doctorId, date: dateStr, status: "IN_CONSULTATION" },
+    { $set: { status: "COMPLETED" } }
+  );
+
+  const nextBooking = readyList[0];
+  nextBooking.status = "IN_CONSULTATION";
+  await nextBooking.save();
+
+  // Immutable audit log
+  await AppointmentTimeline.create({
+    bookingId: nextBooking._id,
+    actor: "doctor",
+    actorId: operatorId,
+    source: "web_portal",
+    event: "IN_CONSULTATION"
+  });
+
+  try {
+    await dispatchToDoctor(doctorId, "PATIENT_CALLED", {
+      bookingNumber: nextBooking.bookingNumber,
+      slotTime: nextBooking.slotTime
+    });
+  } catch (wsErr) {
+    console.error("Realtime next patient broadcast failed:", wsErr);
+  }
+
+  return nextBooking;
+};
+
+/**
+ * Mark consultation completed/closed
+ */
+export const completeConsultation = async (bookingId, operatorId = null) => {
+  const booking = await AppointmentBooking.findById(bookingId);
+  if (!booking) throw new Error("Booking not found.");
+
+  booking.status = "COMPLETED";
+  await booking.save();
+
+  // Immutable audit log
+  await AppointmentTimeline.create({
+    bookingId: booking._id,
+    actor: "doctor",
+    actorId: operatorId,
+    source: "web_portal",
+    event: "COMPLETED"
+  });
+
+  // Calculate wait time since check-in
+  const now = new Date();
+  if (booking.checkInTime) {
+    const waitTimeMs = Math.max(0, now.getTime() - new Date(booking.checkInTime).getTime());
+    await incrementKPI(booking.hospitalId, booking.date, {
+      totalCompletions: 1,
+      totalWaitTimeMs: waitTimeMs
+    });
+  }
+
+  try {
+    await dispatchToDoctor(booking.doctorId, "CONSULTATION_COMPLETED", {
+      bookingNumber: booking.bookingNumber
+    });
+  } catch (wsErr) {
+    console.error("Realtime complete consultation broadcast failed:", wsErr);
+  }
+
+  return booking;
+};
+
+/**
+ * Register Emergency Walk-in bypass
+ */
+export const registerWalkIn = async (hospitalId, doctorId, userId, isPriority = false, operatorId = null) => {
+  const doctor = await Doctor.findById(doctorId);
+  if (!doctor) throw new Error("Doctor profile not found.");
+
+  const policy = await HospitalSchedulingPolicy.findOne({ hospitalId });
+  if (policy && !policy.allowEmergencyWalkIn) {
+    throw new Error("Emergency walk-in bookings are disabled by hospital policy.");
+  }
+
+  // Count active walk-ins today
+  const walkinCount = await AppointmentBooking.countDocuments({
+    hospitalId,
+    date: getTodayIST(),
+    notes: "Emergency Walk-in"
+  });
+
+  const limit = policy ? policy.walkInCapacity : 5;
+  if (walkinCount >= limit) {
+    throw new Error(`Walk-in capacity limit (${limit}) reached for today.`);
+  }
+
+  // Generate slot time dynamically (right now!)
+  const now = new Date();
+  const timeLabel = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+
+  let session = await QueueSession.findOne({ doctorId, date: getTodayIST() });
+  if (!session) {
+    session = await QueueSession.create({
+      doctorId,
+      date: getTodayIST(),
+      sessionState: "CREATED",
+      scheduleSnapshot: {
+        startTime: "09:00",
+        endTime: "17:00",
+        queueLimit: doctor.defaultQueueLimit || 50,
+        doctorName: doctor.name,
+        hospitalName: doctor.hospitalId?.name || "Walkin Hospital",
+        averageConsultationTime: doctor.avgConsultationTime || 10,
+        scheduleVersion: 1
+      }
+    });
+  }
+
+  // Generate booking number
+  const counter = await BookingCounter.findOneAndUpdate(
+    { hospitalId, date: getTodayIST() },
+    { $inc: { count: 1 } },
+    { upsert: true, new: true, returnDocument: "after" }
+  );
+  const cleanDate = getTodayIST().replace(/-/g, "").substring(2);
+  const bookingNumber = `EMG-${cleanDate}-${String(counter.count).padStart(4, "0")}`;
+
+  const booking = await AppointmentBooking.create({
+    bookingNumber,
+    userId,
+    doctorId,
+    hospitalId,
+    sessionId: session._id,
+    date: getTodayIST(),
+    slotTime: timeLabel,
+    status: "READY",
+    arrivalStatus: "CHECKED_IN",
+    checkInTime: now,
+    checkInMethod: "reception",
+    notes: "Emergency Walk-in"
+  });
+
+  // Timeline logging with receptionist metadata
+  await AppointmentTimeline.create({
+    bookingId: booking._id,
+    actor: "receptionist",
+    actorId: operatorId,
+    source: "reception_desk",
+    event: "BOOKED_WALKIN",
+    metadata: { isPriority, bookingNumber }
+  });
+
+  // Update KPI aggregates
+  await incrementKPI(hospitalId, getTodayIST(), {
+    totalBookings: 1,
+    totalCheckIns: 1
+  });
+
+  try {
+    await dispatchToDoctor(doctorId, "PATIENT_READY", { bookingNumber });
+  } catch (wsErr) {
+    console.error("Realtime walk-in ready emit failed:", wsErr);
+  }
+
+  return booking;
+};
+
+

@@ -1,2 +1,28 @@
+# Dependencies
 node_modules
+
+# Environment variables
 .env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Temporary folders
+scratch/
+backups/
+
+# Test files
+test_api_call.js
+test_api_unread.js
+test_doctor_read_all.js
+check_db.js
+
+# Experimental scripts
+scripts/
+
+# OS files
+.DS_Store
+Thumbs.db

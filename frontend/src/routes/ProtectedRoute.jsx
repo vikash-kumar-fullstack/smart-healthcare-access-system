@@ -6,11 +6,26 @@ export default function ProtectedRoute({
 }) {
 
   const token = localStorage.getItem("token");
+  const userStr = localStorage.getItem("user");
   const userRole = localStorage.getItem("role");
 
+  const isAuthenticated = token || userStr;
+
   // Not logged in
-  if (!token) {
+  if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  // Complete profile check for patients
+  if (userRole === "patient") {
+    try {
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      if (!user.profileCompleted && window.location.pathname !== "/complete-profile") {
+        return <Navigate to="/complete-profile" replace />;
+      }
+    } catch (e) {
+      console.error("Error reading complete profile state", e);
+    }
   }
 
   const isAdminRole = (r) => ["admin", "super_admin", "district_admin", "hospital_admin"].includes(r);

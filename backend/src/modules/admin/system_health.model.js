@@ -31,5 +31,7 @@ const systemHealthSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+systemHealthSchema.index({ createdAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
+
 const SystemHealth = mongoose.model("SystemHealth", systemHealthSchema);
 export default SystemHealth;

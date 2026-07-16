@@ -122,7 +122,7 @@ export const getSuggestions = asyncHandler(async (req, res) => {
   }
 
   const prefix = q.trim().toLowerCase();
-  
+
   // Timeout safety boundary of 100ms (Freeze Rule 30)
   const suggestionPromise = (async () => {
     // 1. Fetch matching prefixes from SymptomDictionary (max 8)
@@ -152,7 +152,7 @@ export const getSuggestions = asyncHandler(async (req, res) => {
       const popular = await SearchEvent.find({
         normalizedQuery: { $regex: `^${prefix}`, $options: "i" }
       }).limit(8 - list.size);
-      
+
       console.log(`[DEBUG SUGGESTIONS] popular events found:`, popular.map(p => p.normalizedQuery));
 
       for (const item of popular) {

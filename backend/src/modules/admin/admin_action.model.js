@@ -23,6 +23,14 @@ const adminActionSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.Mixed,
     required: true
   },
+  commandKey: {
+    type: String,
+    unique: true,
+    sparse: true
+  },
+  responseBody: {
+    type: mongoose.Schema.Types.Mixed
+  },
   executedAt: {
     type: Date,
     default: Date.now,

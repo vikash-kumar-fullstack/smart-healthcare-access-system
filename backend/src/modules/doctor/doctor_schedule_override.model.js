@@ -26,7 +26,7 @@ const doctorScheduleOverrideSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-doctorScheduleOverrideSchema.index({ doctorId: 1, date: 1 }, { unique: true });
+doctorScheduleOverrideSchema.index({ doctorId: 1, date: 1, startTime: 1 }, { unique: true });
 
 doctorScheduleOverrideSchema.post("save", async function (doc) {
   try {

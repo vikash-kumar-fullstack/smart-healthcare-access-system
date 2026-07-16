@@ -1,35 +1,24 @@
 export default function StatCard({
   title,
   value,
-  icon,
-  color
+  icon
 }) {
 
   return (
-    <div className={`
-      rounded-xl p-5 shadow bg-white border-l-4 ${color}
-    `}>
-
+    <div className="rounded-lg p-5 bg-white border border-slate-200 shadow-sm">
       <div className="flex justify-between items-center">
-
         <div>
-
-          <p className="text-gray-500 text-sm">
+          <p className="text-slate-500 text-xs font-semibold uppercase tracking-wider">
             {title}
           </p>
-
-          <h2 className="text-2xl font-bold mt-2">
+          <h2 className="text-2xl font-bold mt-1.5 text-slate-900">
             {value}
           </h2>
-
         </div>
-
-        <div className="text-3xl">
+        <div className="text-slate-400 text-2xl font-medium">
           {icon}
         </div>
-
       </div>
-
     </div>
   );
 }

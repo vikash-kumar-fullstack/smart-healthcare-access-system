@@ -70,10 +70,9 @@ export default function History() {
       </h1>
 
       {history.length === 0 ? (
-        <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 text-center text-gray-500">
-          <div className="text-4xl mb-3">📭</div>
-          <p className="font-semibold text-gray-700">No history found</p>
-          <p className="text-sm text-gray-400 mt-1">Your past clinical bookings and visits will show up here.</p>
+        <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-slate-500 shadow-sm">
+          <p className="font-semibold text-slate-700">No appointments yet</p>
+          <p className="mt-1 text-sm text-slate-400">Your completed, skipped, and cancelled visits will show up here.</p>
         </div>
       ) : (
         <div className="space-y-4">

@@ -195,6 +195,16 @@ export const startConsultation = async (visitId, doctorUserId, session = null) =
     }
   );
   
+  setImmediate(async () => {
+    try {
+      const { dispatchToUser, dispatchToDoctor } = await import("../realtime/event_dispatcher.js");
+      await dispatchToUser(visit.patientId, "VISIT_STARTED", { visitId: visit._id });
+      await dispatchToDoctor(visit.doctorId, "VISIT_STARTED", { visitId: visit._id, patientId: visit.patientId });
+    } catch (err) {
+      console.error("Failed to emit VISIT_STARTED realtime event:", err);
+    }
+  });
+
   return visit;
 };
 
@@ -350,6 +360,17 @@ export const completeConsultation = async (visitId, doctorUserId, summaryData, s
     }
   });
   
+  setImmediate(async () => {
+    try {
+      const { dispatchToUser, dispatchToDoctor } = await import("../realtime/event_dispatcher.js");
+      await dispatchToUser(visit.patientId, "VISIT_COMPLETED", { visitId: visit._id });
+      await dispatchToDoctor(visit.doctorId, "VISIT_COMPLETED", { visitId: visit._id });
+      await dispatchToUser(visit.patientId, "EMR_UPDATED", { visitId: visit._id });
+    } catch (err) {
+      console.error("Failed to emit VISIT_COMPLETED / EMR_UPDATED realtime event:", err);
+    }
+  });
+  
   return visit;
 };
 
@@ -394,5 +415,14 @@ export const updateSummary = async (visitId, doctorUserId, summaryData, session 
   
   await appendTimelineEvent(visit._id, "SUMMARY_UPDATED", `Visit summary updated to version ${nextVersion}.`, { version: nextVersion }, dbSession);
   
+  setImmediate(async () => {
+    try {
+      const { dispatchToUser } = await import("../realtime/event_dispatcher.js");
+      await dispatchToUser(visit.patientId, "EMR_UPDATED", { visitId: visit._id, version: nextVersion });
+    } catch (err) {
+      console.error("Failed to emit EMR_UPDATED realtime event:", err);
+    }
+  });
+
   return visit;
 };

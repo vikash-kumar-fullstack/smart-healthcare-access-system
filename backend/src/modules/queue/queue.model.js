@@ -70,12 +70,32 @@ const queueSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  slotTime: {
+    type: String, // e.g. "09:20"
+    default: null
+  },
+  bookedByUserId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null
+  },
+  relationshipId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "FamilyRelationship",
+    default: null
+  },
+  bookedForType: {
+    type: String,
+    enum: ["SELF", "FAMILY_MEMBER"],
+    default: "SELF"
   }
-
 }, { timestamps: true });
 
 queueSchema.index({ doctorId: 1, sessionId: 1 });
 queueSchema.index({ doctorId: 1, status: 1 });
+queueSchema.index({ doctorId: 1, sessionId: 1, queueNumber: 1 });
+queueSchema.index({ status: 1 });
 queueSchema.index({ doctorId: 1, createdAt: -1 });
 queueSchema.index(
   { userId: 1, isActive: 1 },

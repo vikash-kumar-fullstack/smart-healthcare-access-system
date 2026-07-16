@@ -1,4 +1,5 @@
 import AdminReport from "./admin_report.model.js";
+import { paginate } from "../../utils/pagination.js";
 
 export const triggerReport = async (adminUserId, reportType) => {
   const allowed = ["doctor_performance", "queue_summary", "hospital_summary", "system_report"];
@@ -12,8 +13,8 @@ export const triggerReport = async (adminUserId, reportType) => {
   });
 };
 
-export const getReports = async () => {
-  return await AdminReport.find({}).populate("requestedBy", "name email").sort({ createdAt: -1 });
+export const getReports = async (queryOptions = {}) => {
+  return await paginate(AdminReport, queryOptions, {}, [{ path: "requestedBy", select: "name email" }]);
 };
 
 export const getReportById = async (reportId) => {

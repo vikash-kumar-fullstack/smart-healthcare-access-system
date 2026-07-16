@@ -4,7 +4,6 @@ import {
   UserSquare, 
   Check, 
   ShieldCheck, 
-  AlertTriangle, 
   Ban, 
   RotateCcw, 
   RefreshCw 
@@ -20,7 +19,8 @@ export default function Doctors() {
       setLoading(true);
       const res = await api.get("/admin/doctors");
       if (res.data.success) {
-        setDoctors(res.data.data);
+        const list = Array.isArray(res.data.data) ? res.data.data : (res.data.data?.data || []);
+        setDoctors(list);
       }
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load doctors database");
@@ -63,7 +63,7 @@ export default function Doctors() {
   return (
     <div className="space-y-6">
       {error && (
-        <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-4 rounded-lg font-mono text-xs">
+        <div className="bg-rose-500/10 border border-rose-500/30 text-rose-600 p-4 rounded-xl font-mono text-xs text-left">
           <strong>ERROR:</strong> {error}
         </div>
       )}
@@ -71,45 +71,45 @@ export default function Doctors() {
       {/* Grid wrapper */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {doctors.map((doc) => (
-          <div key={doc._id} className="bg-slate-950/40 p-5 rounded-xl border border-slate-800 backdrop-blur shadow-md flex flex-col justify-between space-y-4">
+          <div key={doc._id} className="bg-white p-6 rounded-2xl border border-slate-200/50 hover:shadow-md transition-all duration-205 shadow-sm flex flex-col justify-between space-y-4 text-left">
             <div className="space-y-3">
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg">
-                    <UserSquare className="w-5 h-5 text-teal-400" />
+                  <div className="p-2 bg-slate-50 border border-slate-100 rounded-xl">
+                    <UserSquare className="w-5 h-5 text-[#0E7490]" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-slate-100 tracking-wide text-sm">Dr. {doc.name}</h4>
-                    <p className="text-xs text-slate-400 capitalize">{doc.specialization}</p>
+                    <h4 className="font-extrabold text-slate-850 tracking-tight text-sm">Dr. {doc.name}</h4>
+                    <p className="text-xs text-slate-500 font-semibold capitalize">{doc.specialization}</p>
                   </div>
                 </div>
                 <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
                   doc.status === "verified" 
-                    ? "bg-teal-500/10 text-teal-400 border border-teal-500/20" 
+                    ? "bg-teal-50 text-teal-600 border border-teal-100/50" 
                     : doc.status === "approved" || doc.status === "active"
-                    ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                    ? "bg-emerald-50 text-emerald-600 border border-emerald-100/50"
                     : doc.status === "suspended"
-                    ? "bg-rose-500/10 text-rose-400 border border-rose-500/20"
-                    : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                    ? "bg-rose-50 text-rose-600 border border-rose-100/50"
+                    : "bg-amber-50 text-amber-600 border border-amber-100/50"
                 }`}>
                   {doc.status || "pending"}
                 </span>
               </div>
 
-              <div className="bg-slate-900/60 p-3.5 rounded-lg border border-slate-800 text-xs font-mono space-y-1">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-150 text-xs font-mono space-y-1">
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Hospital:</span>
-                  <span className="text-slate-200 overflow-hidden text-ellipsis whitespace-nowrap max-w-[120px]">
+                  <span className="text-slate-500">Hospital:</span>
+                  <span className="text-slate-700 font-bold overflow-hidden text-ellipsis whitespace-nowrap max-w-[120px]">
                     {doc.hospitalId?.name || "Unassigned"}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Rating:</span>
-                  <span className="text-slate-200">{doc.rating || 0} ★</span>
+                  <span className="text-slate-500">Rating:</span>
+                  <span className="text-slate-700 font-bold">{doc.rating || 0} ★</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Profile complete:</span>
-                  <span className={`font-bold ${doc.profileCompleted ? "text-emerald-400" : "text-amber-400"}`}>
+                  <span className="text-slate-500">Profile complete:</span>
+                  <span className={`font-bold ${doc.profileCompleted ? "text-emerald-650" : "text-amber-650"}`}>
                     {doc.profileCompleted ? "YES" : "NO"}
                   </span>
                 </div>
@@ -117,11 +117,11 @@ export default function Doctors() {
             </div>
 
             {/* Lifecycle Action Buttons */}
-            <div className="border-t border-slate-800/80 pt-3.5 grid grid-cols-2 gap-2 text-center">
+            <div className="border-t border-slate-150 pt-4 grid grid-cols-2 gap-2 text-center">
               {["pending_profile", "pending_activation", "pending", "inactive"].includes(doc.status) && (
                 <button
                   onClick={() => handleAction(doc._id, "approve")}
-                  className="flex items-center justify-center gap-1 bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-slate-950 font-bold py-1.5 px-2.5 rounded-lg text-xs transition duration-200 shadow-md col-span-2"
+                  className="flex items-center justify-center gap-1 bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-1.5 px-2.5 rounded-lg text-xs transition duration-200 shadow-md col-span-2 cursor-pointer border-none"
                 >
                   <Check className="w-3.5 h-3.5" />
                   Approve Profile
@@ -131,7 +131,7 @@ export default function Doctors() {
               {doc.status === "approved" && (
                 <button
                   onClick={() => handleAction(doc._id, "verify")}
-                  className="flex items-center justify-center gap-1 bg-teal-500 hover:bg-teal-600 active:bg-teal-700 text-slate-950 font-bold py-1.5 px-2.5 rounded-lg text-xs transition duration-200 shadow-md col-span-2"
+                  className="flex items-center justify-center gap-1 bg-[#14B8A6] hover:bg-[#119f90] text-white font-bold py-1.5 px-2.5 rounded-lg text-xs transition duration-200 shadow-md col-span-2 cursor-pointer border-none"
                 >
                   <ShieldCheck className="w-3.5 h-3.5" />
                   Verify (Security)
@@ -141,7 +141,7 @@ export default function Doctors() {
               {doc.status !== "suspended" && (
                 <button
                   onClick={() => handleAction(doc._id, "suspend")}
-                  className="flex items-center justify-center gap-1 bg-slate-900 border border-slate-800 hover:bg-rose-600/10 hover:text-rose-400 hover:border-rose-500/20 text-slate-300 font-semibold py-1.5 px-2.5 rounded-lg text-xs transition duration-200"
+                  className="flex items-center justify-center gap-1 bg-slate-50 border border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-500 font-bold py-1.5 px-2.5 rounded-lg text-xs transition duration-200 cursor-pointer"
                 >
                   <Ban className="w-3.5 h-3.5" />
                   Suspend
@@ -151,7 +151,7 @@ export default function Doctors() {
               {doc.status === "suspended" && (
                 <button
                   onClick={() => handleAction(doc._id, "reset")}
-                  className="flex items-center justify-center gap-1 bg-slate-900 border border-slate-800 hover:bg-amber-600/10 hover:text-amber-400 hover:border-amber-500/20 text-slate-300 font-semibold py-1.5 px-2.5 rounded-lg text-xs transition duration-200"
+                  className="flex items-center justify-center gap-1 bg-slate-50 border border-slate-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200 text-slate-500 font-bold py-1.5 px-2.5 rounded-lg text-xs transition duration-200 cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   Reset to Pending

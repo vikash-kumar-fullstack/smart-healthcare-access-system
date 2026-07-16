@@ -1,13 +1,13 @@
 import mongoose from "mongoose";
 
 const validTransitions = {
-  created: ["queued"],
-  queued: ["processing", "delivered", "failed", "expired", "purged"],
-  processing: ["delivered", "failed", "expired", "purged"],
+  created: ["queued", "read"],
+  queued: ["processing", "delivered", "failed", "expired", "purged", "read"],
+  processing: ["delivered", "failed", "expired", "purged", "read"],
   delivered: ["read", "archived", "expired", "purged"],
   read: ["archived", "purged"],
   archived: ["purged"],
-  failed: ["queued", "processing", "purged"],
+  failed: ["queued", "processing", "purged", "read"],
   expired: ["purged"],
   purged: []
 };
@@ -74,6 +74,8 @@ notificationSchema.index({ recipientUserId: 1, archivedAt: 1, createdAt: -1 });
 notificationSchema.index({ recipientUserId: 1, sequenceNumber: 1 }, { unique: true });
 notificationSchema.index({ dedupeKey: 1 });
 notificationSchema.index({ expiresAt: 1 });
+notificationSchema.index({ recipientUserId: 1, createdAt: 1 });
+notificationSchema.index({ status: 1 });
 
 notificationSchema.pre("save", async function () {
   if (this.isModified("status")) {

@@ -91,7 +91,7 @@ export default function RecordDetails() {
           } else {
             localStorage.removeItem(draftKey);
           }
-        } catch (e) {
+        } catch {
           localStorage.removeItem(draftKey);
         }
       } else {

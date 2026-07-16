@@ -38,9 +38,40 @@ const resolveDoctorId = async (userId) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const book = asyncHandler(async (req, res) => {
-  const userId = req.user.userId;
-  const { doctorId, bookingDate } = req.body;
-  const queue = await bookQueue(userId, doctorId, bookingDate);
+  const ownerId = req.user.userId;
+  const patientId = req.body.patientId || ownerId;
+  const { doctorId, bookingDate, slotTime } = req.body;
+
+  let bookedForType = "SELF";
+  let relationshipId = null;
+
+  if (patientId.toString() !== ownerId.toString()) {
+    const FamilyRelationship = (await import("../user/family_relationship.model.js")).default;
+    const rel = await FamilyRelationship.findOne({
+      ownerId,
+      relativeId: patientId
+    });
+
+    if (!rel) {
+      throw Object.assign(new Error("Access denied: No family relationship found."), { status: 403 });
+    }
+
+    if (rel.status !== "ACTIVE") {
+      throw Object.assign(new Error(`Booking blocked: Family member profile is ${rel.status.toLowerCase()}.`), { status: 403 });
+    }
+
+    if (rel.validUntil && rel.validUntil < new Date()) {
+      rel.status = "ARCHIVED";
+      rel.revocationReason = "Relationship expired";
+      await rel.save();
+      throw Object.assign(new Error("Booking blocked: Family relationship has expired."), { status: 403 });
+    }
+
+    relationshipId = rel._id;
+    bookedForType = "FAMILY_MEMBER";
+  }
+
+  const queue = await bookQueue(patientId, doctorId, bookingDate, slotTime, ownerId, relationshipId, bookedForType);
   const message = queue.canBook ? "Booking successful" : (queue.reason || "Booking blocked");
   return successResponse(res, queue, message);
 });
@@ -56,7 +87,7 @@ export const cancel = asyncHandler(async (req, res) => {
 });
 
 export const history = asyncHandler(async (req, res) => {
-  const data = await getQueueHistory(req.user.userId);
+  const data = await getQueueHistory(req.user.userId, req.query);
   return successResponse(res, data, "Queue history fetched");
 });
 

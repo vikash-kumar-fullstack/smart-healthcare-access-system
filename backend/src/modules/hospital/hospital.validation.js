@@ -3,7 +3,9 @@ import { z } from "zod";
 export const hospitalQuerySchema = z.object({
   specialization: z.string().optional(),
   lat: z.string().optional(),
-  lng: z.string().optional()
+  lng: z.string().optional(),
+  page: z.string().optional(),
+  limit: z.string().optional()
 });
 
 export const createHospitalSchema = z.object({

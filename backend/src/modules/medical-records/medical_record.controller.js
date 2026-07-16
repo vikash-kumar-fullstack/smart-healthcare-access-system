@@ -63,7 +63,7 @@ export const getRecord = asyncHandler(async (req, res) => {
 export const getHistory = asyncHandler(async (req, res) => {
   // If doctor, they must provide patientId query param. If patient, use their own userId.
   let patientId = req.query.patientId;
-  if (req.user.role === "patient") {
+  if (req.user.role === "patient" && !patientId) {
     patientId = req.user.userId;
   }
 

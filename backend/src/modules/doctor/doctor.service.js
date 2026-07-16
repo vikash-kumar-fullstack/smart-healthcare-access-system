@@ -23,10 +23,10 @@ const roundMins = (n) => Math.round(Math.max(n ?? 0, 0));
 export const getNextAvailableSlot = async (doctorId, startDateStr) => {
   const weekdays = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   let currentDate = new Date(startDateStr);
-  
+
   for (let i = 0; i < 8; i++) {
     const checkDateStr = currentDate.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-    
+
     // 1. Check override
     const override = await DoctorScheduleOverride.findOne({ doctorId, date: checkDateStr });
     if (override) {
@@ -43,7 +43,7 @@ export const getNextAvailableSlot = async (doctorId, startDateStr) => {
         return `${label} ${schedule.startTime}`;
       }
     }
-    
+
     currentDate.setDate(currentDate.getDate() + 1);
   }
   return "Next week";
@@ -57,14 +57,22 @@ export const getNextAvailableSlot = async (doctorId, startDateStr) => {
 //  After:  1 aggregation + 1 find — O(1) queries regardless of doctor count.
 // ═══════════════════════════════════════════════════════════════════════════════
 export const getDoctors = async (query) => {
-  const { hospitalId, specialization } = query;
+  const { hospitalId, specialization, page, limit = 10, sort = "name", order = "asc", search = "" } = query;
 
   // ── 1. Build doctor filter ─────────────────────────────────────────────────
   const doctorFilter = {};
-  if (hospitalId)     doctorFilter.hospitalId     = new mongoose.Types.ObjectId(hospitalId);
+  if (hospitalId) doctorFilter.hospitalId = new mongoose.Types.ObjectId(hospitalId);
   if (specialization) doctorFilter.specialization = specialization;
+  if (search) {
+    doctorFilter.name = { $regex: search, $options: "i" };
+  }
 
   const today = getTodayIST();
+
+  const isPaginated = page !== undefined;
+  const pageNum = isPaginated ? Math.max(1, parseInt(page, 10)) : 1;
+  const limitNum = isPaginated ? Math.max(1, parseInt(limit, 10)) : 10;
+  const skip = (pageNum - 1) * limitNum;
 
   // ── 2. Single aggregation: joins sessions + queue counts in one round trip ─
   const enriched = await Doctor.aggregate([
@@ -73,8 +81,8 @@ export const getDoctors = async (query) => {
     // Look up today's session for each doctor
     {
       $lookup: {
-        from:     "queuesessions",
-        let:      { doctorId: "$_id" },
+        from: "queuesessions",
+        let: { doctorId: "$_id" },
         pipeline: [
           {
             $match: {
@@ -95,8 +103,8 @@ export const getDoctors = async (query) => {
     // Look up active queue entries for today's session
     {
       $lookup: {
-        from:     "queues",
-        let:      { sessionId: "$session._id" },
+        from: "queues",
+        let: { sessionId: "$session._id" },
         pipeline: [
           {
             $match: {
@@ -117,7 +125,7 @@ export const getDoctors = async (query) => {
     // Compute derived fields
     {
       $addFields: {
-        queueLoad:     { $size: "$activeQueue" },
+        queueLoad: { $size: "$activeQueue" },
         sessionStatus: { $ifNull: ["$session.sessionStatus", "inactive"] },
         // The in-progress patient (first match with status = in_progress)
         inProgressEntry: {
@@ -125,8 +133,8 @@ export const getDoctors = async (query) => {
             {
               $filter: {
                 input: "$activeQueue",
-                as:    "q",
-                cond:  { $eq: ["$$q.status", "in_progress"] }
+                as: "q",
+                cond: { $eq: ["$$q.status", "in_progress"] }
               }
             },
             0
@@ -138,20 +146,20 @@ export const getDoctors = async (query) => {
     // Project only what we need going forward
     {
       $project: {
-        name:               1,
-        specialization:     1,
-        hospitalId:         1,
+        name: 1,
+        specialization: 1,
+        hospitalId: 1,
         avgConsultationTime: { $ifNull: ["$avgConsultationTime", 5] },
-        defaultQueueLimit:  { $ifNull: ["$defaultQueueLimit", 50] },
-        isAvailable:        1,
-        availabilityState:  { $ifNull: ["$availabilityState", "available"] },
-        temporaryNotice:    1,
-        rating:             1,
-        experienceYears:    1,
-        queueLoad:          1,
-        sessionStatus:      1,
-        inProgressEntry:    1,
-        activeQueue:        1
+        defaultQueueLimit: { $ifNull: ["$defaultQueueLimit", 50] },
+        isAvailable: 1,
+        availabilityState: { $ifNull: ["$availabilityState", "available"] },
+        temporaryNotice: 1,
+        rating: 1,
+        experienceYears: 1,
+        queueLoad: 1,
+        sessionStatus: 1,
+        inProgressEntry: 1,
+        activeQueue: 1
       }
     }
   ]);
@@ -160,9 +168,9 @@ export const getDoctors = async (query) => {
   const now = Date.now();
 
   const result = await Promise.all(enriched.map(async (doc) => {
-    const ss      = doc.sessionStatus;
+    const ss = doc.sessionStatus;
     const avgTime = doc.avgConsultationTime;
-    const limit   = doc.defaultQueueLimit;
+    const limit = doc.defaultQueueLimit;
 
     // ETA calculation — only meaningful when session is active
     let estimatedWaitTime = 0;
@@ -202,27 +210,28 @@ export const getDoctors = async (query) => {
 
     // Ranking score
     let score = 0;
-    if (isAvailable)    score += 30;
+    if (isAvailable) score += 30;
     if (ss === "active") score += 20;
     score += Math.max(0, 60 - estimatedWaitTime);   // lower wait = higher score
     score += (doc.rating || 0) * 5;
     score += (doc.experienceYears || 0) * 0.5;
 
     return {
-      id:               doc._id,
-      name:             doc.name,
-      specialization:   doc.specialization,
-      rating:           doc.rating,
-      experienceYears:  doc.experienceYears,
+      _id: doc._id,
+      id: doc._id,
+      name: doc.name,
+      specialization: doc.specialization,
+      rating: doc.rating,
+      experienceYears: doc.experienceYears,
       isAvailable,
       availabilityState: computedAvailabilityState,
-      temporaryNotice:  doc.temporaryNotice,
+      temporaryNotice: doc.temporaryNotice,
       isDelayed,
       nextAvailable,
       defaultQueueLimit: limit,
-      queueLoad:        doc.queueLoad,
+      queueLoad: doc.queueLoad,
       estimatedWaitTime,    // always whole number (0 when session inactive)
-      sessionStatus:    ss, // "inactive" | "active" | "paused" | "closed"
+      sessionStatus: ss, // "inactive" | "active" | "paused" | "closed"
       score
     };
   }));
@@ -231,7 +240,22 @@ export const getDoctors = async (query) => {
   result.sort((a, b) => b.score - a.score);
 
   // Strip internal score before returning
-  return result.map(({ score, ...d }) => d);
+  const data = result.map(({ score, ...d }) => d);
+
+  if (isPaginated) {
+    const paginatedData = data.slice(skip, skip + limitNum);
+    return {
+      data: paginatedData,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total: data.length,
+        totalPages: Math.ceil(data.length / limitNum)
+      }
+    };
+  }
+
+  return data;
 };
 
 
@@ -505,7 +529,7 @@ export const updateSettingsService = async (userId, data) => {
                   aggregateId: p._id,
                   metadata: { route: "/queue", entityId: p._id.toString() }
                 }
-              ).catch(() => {});
+              ).catch(() => { });
             }
           } else if (sessionPolicy === "stop_bookings") {
             queueSession.sessionStatus = "closing";

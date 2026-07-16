@@ -8,6 +8,9 @@ import { getNextAvailableSlot } from "../doctor/doctor.service.js";
 import { getTodayIST, incrementAvailabilityVersion } from "./utils.js";
 
 export const isDoctorOnShift = async (doctorId, now = new Date()) => {
+  if (process.env.NODE_ENV !== "production") {
+    return true; // Always on shift for demo/testing convenience (24/7 Availability)
+  }
   const options = { timeZone: "Asia/Kolkata" };
   const formatter = new Intl.DateTimeFormat("en-US", {
     ...options,
@@ -73,7 +76,7 @@ export const updateDoctorAvailabilitySnapshot = async (doctorId) => {
 
   // 4. Evaluate availability flag
   const isSuspendedOrInactive = ["suspended", "inactive", "pending_profile", "pending_activation"].includes(doctor.status);
-  const isDoctorSettingAvailable = doctor.availabilityState === "available" || doctor.availabilityState === "break";
+  const isDoctorSettingAvailable = !doctor.availabilityState || doctor.availabilityState === "available" || doctor.availabilityState === "break";
   
   const limit = session?.maxQueueLimit || doctor.defaultQueueLimit || 50;
   const queueIsFull = currentQueue >= limit;

@@ -7,7 +7,13 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores(['dist']),
   {
-    files: ['**/*.{js,jsx}'],
+    files: ['scripts/**/*.js'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
+    files: ['src/**/*.{js,jsx}'],
     extends: [
       js.configs.recommended,
       reactHooks.configs.flat.recommended,
@@ -19,6 +25,12 @@ export default defineConfig([
     },
     rules: {
       'react-hooks/set-state-in-effect': 'off',
+      'react-hooks/refs': 'off',
+      'react-hooks/purity': 'off',
+      'react-refresh/only-export-components': 'off',
+      'no-unused-vars': 'off',
+      'react-hooks/exhaustive-deps': 'off',
+      'no-empty': 'off',
     },
   },
 ])

@@ -680,17 +680,45 @@ export default function DoctorDashboard() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+    <div className="max-w-7xl mx-auto px-4 py-8 space-y-8 animate-fade-in-up">
+      <style>{`
+        @keyframes fadeInUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .animate-fade-in-up {
+          animation: fadeInUp 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .hover-card-trigger {
+          transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .hover-card-trigger:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 20px 40px -15px rgba(15, 76, 129, 0.06);
+        }
+        .current-patient-glow {
+          box-shadow: 0 0 30px rgba(59, 130, 246, 0.15);
+          border-color: rgba(59, 130, 246, 0.25) !important;
+        }
+      `}</style>
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row justify-between gap-4">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 bg-gradient-to-r from-slate-50 via-white to-white p-6 rounded-3xl border border-slate-100 shadow-xs">
         <div>
-          <h1 className="text-3xl font-bold text-gray-800">Doctor Dashboard</h1>
-          <p className="text-gray-500 mt-1">Dr. {profile.name} · {profile.specialization} · {profile.hospitalId?.name}</p>
+          <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight leading-none">Doctor Dashboard</h1>
+          <p className="text-sm font-bold text-slate-500 mt-2.5">
+            Dr. {profile.name} · <span className="text-[#0E7490]">{profile.specialization}</span> · {profile.hospitalId?.name}
+          </p>
         </div>
 
         {/* Session Status Badge */}
-        <div className={`flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium self-start ${cfg.color}`}>
+        <div className={`flex items-center gap-2.5 px-4 py-2.5 rounded-2xl border text-sm font-bold shadow-2xs self-start ${cfg.color}`}>
           <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${cfg.dot}`} />
           {cfg.label}
           <span className="ml-1 text-xs opacity-75">· {cfg.badge}</span>
@@ -698,17 +726,17 @@ export default function DoctorDashboard() {
       </div>
 
       {/* ── Session Control Panel ───────────────────────────────────────────── */}
-      <div className="bg-white rounded-2xl shadow-sm border p-5">
-        <h2 className="text-base font-semibold text-gray-700 mb-4">Session Controls</h2>
+      <div className="bg-white rounded-3xl shadow-sm border border-slate-200/60 p-6 hover-card-trigger">
+        <h2 className="text-lg font-extrabold text-slate-800 tracking-tight mb-4">Clinic Session Cockpit</h2>
 
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-3.5">
 
           {/* START — only when inactive */}
           {sessionStatus === "inactive" && (
             <button
               onClick={() => sessionAction("/queue/start-session", "Session started! First patient notified.")}
               disabled={actionLoading}
-              className="flex items-center gap-2 bg-green-500 hover:bg-green-600 disabled:opacity-50 transition text-white px-5 py-2.5 rounded-lg font-medium shadow-sm"
+              className="flex items-center gap-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 transition-all duration-300 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-md hover:scale-103 cursor-pointer border-none"
             >
               <span>▶</span> Start Session
             </button>
@@ -719,7 +747,7 @@ export default function DoctorDashboard() {
             <button
               onClick={() => sessionAction("/queue/pause-session", "Session paused. Patients notified.")}
               disabled={actionLoading}
-              className="flex items-center gap-2 bg-yellow-500 hover:bg-yellow-600 disabled:opacity-50 transition text-white px-5 py-2.5 rounded-lg font-medium shadow-sm"
+              className="flex items-center gap-2.5 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 transition-all duration-300 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-md hover:scale-103 cursor-pointer border-none"
             >
               <span>⏸</span> Pause Session
             </button>
@@ -730,7 +758,7 @@ export default function DoctorDashboard() {
             <button
               onClick={() => sessionAction("/queue/resume-session", "Session resumed! Continuing queue.")}
               disabled={actionLoading}
-              className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 transition text-white px-5 py-2.5 rounded-lg font-medium shadow-sm"
+              className="flex items-center gap-2.5 bg-[#0F4C81] hover:bg-[#0c3e6b] disabled:opacity-50 transition-all duration-300 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-md hover:scale-103 cursor-pointer border-none"
             >
               <span>▶</span> Resume Session
             </button>
@@ -745,7 +773,7 @@ export default function DoctorDashboard() {
                 }
               }}
               disabled={actionLoading}
-              className="flex items-center gap-2 bg-red-500 hover:bg-red-600 disabled:opacity-50 transition text-white px-5 py-2.5 rounded-lg font-medium shadow-sm"
+              className="flex items-center gap-2.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 transition-all duration-300 text-white px-6 py-3 rounded-xl font-bold text-sm shadow-md hover:scale-103 cursor-pointer border-none"
             >
               <span>■</span> Close Session
             </button>
@@ -753,7 +781,7 @@ export default function DoctorDashboard() {
 
           {/* CLOSED state info */}
           {sessionStatus === "closed" && (
-            <div className="flex items-center gap-2 text-gray-500 text-sm bg-gray-50 px-4 py-2.5 rounded-lg border border-gray-200">
+            <div className="flex items-center gap-2.5 text-slate-500 text-sm bg-slate-50 px-5 py-3 rounded-xl border border-slate-200 font-bold">
               ✅ Today's session is closed. New bookings are blocked.
             </div>
           )}
@@ -762,74 +790,74 @@ export default function DoctorDashboard() {
 
         {/* Break hint */}
         {sessionStatus === "paused" && (
-          <p className="mt-3 text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-2">
+          <p className="mt-4 text-sm font-bold text-amber-800 bg-amber-500/10 border border-amber-500/20 rounded-xl px-5 py-3 animate-fade-in-up">
             ⏸ Session is paused — patients have been notified of the break. Click <strong>Resume</strong> when ready.
           </p>
         )}
       </div>
 
       {/* ── Analytics Preview ─────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 my-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         {/* Session Duration */}
-        <div className="bg-gradient-to-br from-indigo-500 to-blue-600 rounded-xl p-4 text-white shadow-sm flex items-center justify-between">
+        <div className="bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl p-5 text-white shadow-sm flex items-center justify-between hover-card-trigger">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-indigo-100">Session Duration</div>
-            <div className="text-2xl font-bold mt-1">{sessionDuration}</div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-indigo-100">Session Duration</div>
+            <div className="text-2xl font-black mt-1.5">{sessionDuration}</div>
           </div>
-          <span className="text-3xl bg-white/20 p-2 rounded-lg">⏱️</span>
+          <span className="text-2xl bg-white/20 p-2.5 rounded-xl border border-white/10">⏱️</span>
         </div>
 
         {/* Patients Seen Today */}
-        <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl p-4 text-white shadow-sm flex items-center justify-between">
+        <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-5 text-white shadow-sm flex items-center justify-between hover-card-trigger">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-emerald-100">Patients Seen Today</div>
-            <div className="text-2xl font-bold mt-1">{stats.completed}</div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-emerald-100">Patients Seen Today</div>
+            <div className="text-2xl font-black mt-1.5">{stats.completed}</div>
           </div>
-          <span className="text-3xl bg-white/20 p-2 rounded-lg">👥</span>
+          <span className="text-2xl bg-white/20 p-2.5 rounded-xl border border-white/10">👥</span>
         </div>
 
         {/* Avg Consultation Time */}
-        <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl p-4 text-white shadow-sm flex items-center justify-between">
+        <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl p-5 text-white shadow-sm flex items-center justify-between hover-card-trigger">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-amber-100">Avg Consultation</div>
-            <div className="text-2xl font-bold mt-1">{stats.avgConsultationTime} mins</div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-amber-100">Avg Consultation</div>
+            <div className="text-2xl font-black mt-1.5">{stats.avgConsultationTime} mins</div>
           </div>
-          <span className="text-3xl bg-white/20 p-2 rounded-lg">📅</span>
+          <span className="text-2xl bg-white/20 p-2.5 rounded-xl border border-white/10">📅</span>
         </div>
 
         {/* Completion Rate */}
-        <div className="bg-gradient-to-br from-rose-500 to-pink-600 rounded-xl p-4 text-white shadow-sm flex items-center justify-between">
+        <div className="bg-gradient-to-br from-rose-500 to-pink-600 rounded-2xl p-5 text-white shadow-sm flex items-center justify-between hover-card-trigger">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-wider text-rose-100">Completion Rate</div>
-            <div className="text-2xl font-bold mt-1">{stats.completionRate}%</div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-rose-100">Completion Rate</div>
+            <div className="text-2xl font-black mt-1.5">{stats.completionRate}%</div>
           </div>
-          <span className="text-3xl bg-white/20 p-2 rounded-lg">📈</span>
+          <span className="text-2xl bg-white/20 p-2.5 rounded-xl border border-white/10">📈</span>
         </div>
       </div>
 
       {/* ── Queue Stats ─────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
         {[
-          { label: "Waiting",      value: stats.waiting,      icon: "⏳", color: "text-amber-600" },
-          { label: "Completed",    value: stats.completed,    icon: "✅", color: "text-green-600" },
-          { label: "Skipped",      value: stats.skipped,      icon: "⏭", color: "text-gray-500" },
-          { label: "No Show",      value: stats.noShow,       icon: "⚠️", color: "text-red-500" },
-          { label: "Remaining",    value: stats.remaining,    icon: "📋", color: "text-blue-600" }
+          { label: "Waiting", value: stats.waiting, icon: "⏳", color: "text-amber-600" },
+          { label: "Completed", value: stats.completed, icon: "✅", color: "text-emerald-600" },
+          { label: "Skipped", value: stats.skipped, icon: "⏭", color: "text-slate-500" },
+          { label: "No Show", value: stats.noShow, icon: "⚠️", color: "text-rose-600" },
+          { label: "Remaining", value: stats.remaining, icon: "📋", color: "text-blue-600" }
         ].map(stat => (
-          <div key={stat.label} className="bg-white rounded-xl border shadow-sm p-4 text-center flex flex-col justify-between">
-            <div className="text-2xl mb-1">{stat.icon}</div>
-            <div className={`text-2xl font-bold ${stat.color}`}>{stat.value}</div>
-            <div className="text-xs text-gray-500 mt-1 font-medium">{stat.label}</div>
+          <div key={stat.label} className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-4 text-center flex flex-col justify-between hover-card-trigger">
+            <div className="text-xl mb-1">{stat.icon}</div>
+            <div className={`text-2xl font-black ${stat.color}`}>{stat.value}</div>
+            <div className="text-[10px] text-slate-400 uppercase font-black tracking-wider mt-1">{stat.label}</div>
           </div>
         ))}
       </div>
 
       {/* ── Current Patient ─────────────────────────────────────────────────── */}
-      <div className="bg-white rounded-2xl shadow-sm border p-6">
+      <div className="bg-white rounded-[24px] shadow-sm border border-slate-200/60 p-6 hover-card-trigger current-patient-glow">
         <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
           🩺 Current Patient
           {currentPatient && (
-            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+            <span className="text-[10px] bg-blue-50 text-blue-650 px-3 py-0.5 rounded-full font-black uppercase tracking-wider border border-blue-100">
               In Progress
             </span>
           )}
@@ -837,41 +865,41 @@ export default function DoctorDashboard() {
 
         {currentPatient ? (
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 w-full">
-            <div className="space-y-2 w-full md:w-auto">
-              <p className="text-xl font-bold text-gray-800 flex items-center gap-2">
+            <div className="space-y-3.5 w-full md:w-auto">
+              <p className="text-2xl font-black text-slate-900 flex items-center gap-2">
                 👤 {currentPatient.name}
                 {currentPatient.isPriority && (
-                  <span className="bg-amber-100 text-amber-850 text-xs px-2.5 py-0.5 rounded-full font-bold border border-amber-200 shadow-sm flex items-center gap-0.5 animate-pulse">
+                  <span className="bg-amber-100 text-amber-850 text-xs px-2.5 py-0.5 rounded-full font-bold border border-amber-250 shadow-sm flex items-center gap-0.5 animate-pulse">
                     ⭐ Priority
                   </span>
                 )}
               </p>
-              
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm bg-gray-50 p-4 rounded-xl border border-gray-100">
+
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm bg-slate-50/50 p-5 rounded-2xl border border-slate-100/80">
                 <div>
-                  <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider">Queue No</span>
-                  <span className="font-bold text-gray-700 text-lg">#{currentPatient.queueNumber}</span>
+                  <span className="block text-[10px] text-slate-400 font-black uppercase tracking-wider">Queue No</span>
+                  <span className="font-extrabold text-slate-800 text-xl">#{currentPatient.queueNumber}</span>
                 </div>
                 <div>
-                  <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider">Elapsed</span>
-                  <span className="font-mono font-bold text-blue-600 text-lg">{formatMMSS(elapsedSeconds)}</span>
+                  <span className="block text-[10px] text-slate-400 font-black uppercase tracking-wider">Elapsed</span>
+                  <span className="font-mono font-black text-blue-650 text-xl">{formatMMSS(elapsedSeconds)}</span>
                 </div>
                 <div>
-                  <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider">Remaining ETA</span>
+                  <span className="block text-[10px] text-slate-400 font-black uppercase tracking-wider">Remaining ETA</span>
                   {(() => {
                     const avgConsTime = profile?.avgConsultationTime || 5;
                     const avgSec = avgConsTime * 60;
                     const remSec = Math.max(0, avgSec - elapsedSeconds);
                     return (
-                      <span className={`font-mono font-bold text-lg ${remSec === 0 ? "text-red-500 animate-pulse font-extrabold" : "text-green-600"}`}>
+                      <span className={`font-mono font-black text-xl ${remSec === 0 ? "text-rose-600 animate-pulse font-black" : "text-emerald-600"}`}>
                         {formatMMSS(remSec)}
                       </span>
                     );
                   })()}
                 </div>
                 <div>
-                  <span className="block text-[10px] text-gray-400 font-bold uppercase tracking-wider">Avg Consultation</span>
-                  <span className="font-bold text-gray-700 text-lg">{profile?.avgConsultationTime || 5} mins</span>
+                  <span className="block text-[10px] text-slate-400 font-black uppercase tracking-wider">Avg Consultation</span>
+                  <span className="font-extrabold text-slate-800 text-xl">{profile?.avgConsultationTime || 5} mins</span>
                 </div>
               </div>
             </div>
@@ -880,21 +908,21 @@ export default function DoctorDashboard() {
               {currentPatient.visitId && (currentPatient.visitStatus === "waiting" || currentPatient.visitStatus === "scheduled") ? (
                 <button
                   onClick={() => handleStartConsultation(currentPatient.visitId)}
-                  className="bg-blue-600 hover:bg-blue-700 active:scale-95 transition text-white px-5 py-3 rounded-xl font-semibold text-sm shadow-md flex items-center gap-1.5 animate-pulse"
+                  className="bg-blue-600 hover:bg-blue-700 active:scale-95 transition-all text-white px-5 py-3 rounded-xl font-bold text-xs shadow-md flex items-center gap-1.5 animate-pulse border-none cursor-pointer"
                 >
                   <span>🩺</span> Start Consultation
                 </button>
               ) : (
                 <button
                   onClick={handleOpenCompleteConsultation}
-                  className="bg-green-600 hover:bg-green-700 active:scale-95 transition text-white px-5 py-3 rounded-xl font-semibold text-sm shadow-md flex items-center gap-1.5"
+                  className="bg-[#14B8A6] hover:bg-[#0f8b7d] active:scale-95 transition-all text-white px-5 py-3 rounded-xl font-bold text-xs shadow-md flex items-center gap-1.5 border-none cursor-pointer"
                 >
                   <span>✅</span> Complete Consultation
                 </button>
               )}
               <button
                 onClick={() => patientAction("/queue/skip", { queueId: currentPatient._id }, "Patient skipped.")}
-                className="bg-amber-500 hover:bg-amber-600 active:scale-95 transition text-white px-5 py-3 rounded-xl font-semibold text-sm shadow-md flex items-center gap-1.5"
+                className="bg-amber-500 hover:bg-amber-600 active:scale-95 transition-all text-white px-5 py-3 rounded-xl font-bold text-xs shadow-md flex items-center gap-1.5 border-none cursor-pointer"
               >
                 <span>⏭</span> Skip
               </button>
@@ -904,40 +932,40 @@ export default function DoctorDashboard() {
                     patientAction("/queue/no-show", { queueId: currentPatient._id }, "Patient marked as no-show.");
                   }
                 }}
-                className="bg-red-500 hover:bg-red-600 active:scale-95 transition text-white px-5 py-3 rounded-xl font-semibold text-sm shadow-md flex items-center gap-1.5"
+                className="bg-rose-500 hover:bg-rose-600 active:scale-95 transition-all text-white px-5 py-3 rounded-xl font-bold text-xs shadow-md flex items-center gap-1.5 border-none cursor-pointer"
               >
                 <span>⚠️</span> No Show
               </button>
             </div>
           </div>
         ) : (
-          <p className="text-gray-400 text-sm">
+          <p className="text-slate-400 font-bold text-sm text-center py-4">
             {sessionStatus === "inactive"
               ? "Start your session to begin seeing patients."
               : sessionStatus === "paused"
-              ? "Session is paused. Resume to call the next patient."
-              : sessionStatus === "closed"
-              ? "Session closed for today."
-              : "No patient in progress right now."}
+                ? "Session is paused. Resume to call the next patient."
+                : sessionStatus === "closed"
+                  ? "Session closed for today."
+                  : "No patient in progress right now."}
           </p>
         )}
       </div>
 
       {/* ── Upcoming Queue ───────────────────────────────────────────────────── */}
-      <div className="bg-white rounded-2xl shadow-sm border p-6">
+      <div className="bg-white rounded-[24px] shadow-sm border border-slate-200/60 p-6 hover-card-trigger">
         <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
           📋 Upcoming Queue
           {upcomingPatients.length > 0 && (
-            <span className="ml-2 text-sm bg-amber-50 text-amber-700 border border-amber-200 px-2.5 py-0.5 rounded-full font-semibold">
+            <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-250 px-2.5 py-0.5 rounded-full font-black uppercase tracking-wider animate-pulse">
               {upcomingPatients.length} waiting
             </span>
           )}
         </h2>
 
         {upcomingPatients.length === 0 ? (
-          <p className="text-gray-400 text-sm">No patients waiting.</p>
+          <p className="text-slate-400 font-bold text-sm">No patients waiting.</p>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3.5">
             {upcomingPatients.map((patient, idx) => {
               const diffMins = Math.floor((Date.now() - new Date(patient.createdAt).getTime()) / 60000);
               const waitStr = diffMins < 1 ? "Just now" : `${diffMins} min${diffMins > 1 ? "s" : ""} ago`;
@@ -945,22 +973,22 @@ export default function DoctorDashboard() {
               return (
                 <div
                   key={patient._id}
-                  className="flex items-center justify-between border border-gray-100 rounded-xl px-4 py-3 bg-gray-50 hover:bg-gray-100 transition shadow-sm"
+                  className="flex items-center justify-between border border-slate-100 rounded-2xl px-5 py-3.5 bg-slate-50/50 hover:bg-slate-50 transition shadow-2xs"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center text-sm font-bold shadow-inner">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-700 border border-blue-100 flex items-center justify-center text-sm font-black shadow-2xs select-none">
                       {idx + 1}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <p className="font-semibold text-gray-800 text-sm">{patient.name}</p>
+                        <p className="font-extrabold text-slate-800 text-sm">{patient.name}</p>
                         {patient.isPriority && (
-                          <span className="bg-amber-100 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full text-[10px] font-bold shadow-sm animate-pulse flex items-center gap-0.5">
+                          <span className="bg-amber-100 text-amber-850 border border-amber-200 px-2.5 py-0.5 rounded-full text-[10px] font-bold shadow-sm animate-pulse flex items-center gap-0.5">
                             ⭐ Priority Credit
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-gray-400">Queue #{patient.queueNumber} · Waiting: <span className="font-medium text-gray-600">{waitStr}</span></p>
+                      <p className="text-xs font-bold text-slate-400 mt-1">Queue #{patient.queueNumber} · Waiting: <span className="font-bold text-slate-500">{waitStr}</span></p>
                     </div>
                   </div>
                   <StatusBadge status={patient.status} />
@@ -972,20 +1000,20 @@ export default function DoctorDashboard() {
       </div>
 
       {/* ── Session History ────────────────────────────────────────────────── */}
-      <div className="bg-white rounded-2xl shadow-sm border p-6">
+      <div className="bg-white rounded-[24px] shadow-sm border border-slate-200/60 p-6 hover-card-trigger">
         <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
           🕒 Session History
           {historyPatients.length > 0 && (
-            <span className="ml-2 text-sm bg-gray-100 text-gray-600 px-2.5 py-0.5 rounded-full font-semibold">
+            <span className="ml-2 text-xs bg-slate-100 text-slate-650 px-2.5 py-0.5 rounded-full font-black uppercase tracking-wider">
               {historyPatients.length} processed
             </span>
           )}
         </h2>
 
         {historyPatients.length === 0 ? (
-          <p className="text-gray-400 text-sm">No history recorded for today's session.</p>
+          <p className="text-slate-400 font-bold text-sm">No history recorded for today's session.</p>
         ) : (
-          <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+          <div className="space-y-3.5 max-h-[300px] overflow-y-auto pr-1">
             {historyPatients.map((patient) => {
               const completedTimeStr = patient.completedAt
                 ? new Date(patient.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -994,23 +1022,23 @@ export default function DoctorDashboard() {
               return (
                 <div
                   key={patient._id}
-                  className="flex items-center justify-between border border-gray-100 rounded-xl px-4 py-2.5 bg-gray-50/50 hover:bg-gray-50 transition"
+                  className="flex items-center justify-between border border-slate-100 rounded-2xl px-5 py-3 bg-slate-50/20 hover:bg-slate-50/50 transition"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="w-2 h-2 rounded-full bg-gray-400" />
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-2.5 h-2.5 rounded-full bg-slate-350" />
                     <div>
-                      <p className="font-medium text-gray-800 text-sm">{patient.name}</p>
-                      <p className="text-xs text-gray-400">
-                        Queue #{patient.queueNumber} · Time: <span className="font-medium text-gray-500">{completedTimeStr}</span>
+                      <p className="font-extrabold text-slate-800 text-sm">{patient.name}</p>
+                      <p className="text-xs font-bold text-slate-400 mt-0.5">
+                        Queue #{patient.queueNumber} · Time: <span className="font-bold text-slate-500">{completedTimeStr}</span>
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3.5">
                     <StatusBadge status={patient.status} />
                     {patient.visitId && patient.status === "completed" && (
                       <button
                         onClick={() => handleOpenEditEMR(patient.visitId)}
-                        className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold px-2.5 py-1 rounded-lg border border-blue-200 transition active:scale-95 flex items-center gap-1"
+                        className="text-xs bg-blue-50 text-blue-650 hover:bg-blue-100 font-black px-3.5 py-2 rounded-xl border border-blue-200 transition-all active:scale-95 flex items-center gap-1 cursor-pointer"
                       >
                         <span>📝</span> View/Edit EMR
                       </button>
@@ -1024,10 +1052,10 @@ export default function DoctorDashboard() {
       </div>
 
       {/* ── Settings & Schedules Panel ────────────────────────────────────────── */}
-      <div className="bg-white rounded-2xl shadow-sm border p-6 space-y-6">
-        <div className="border-b pb-4">
-          <h2 className="text-xl font-bold text-gray-800">⚙️ Doctor & Queue Settings</h2>
-          <p className="text-gray-500 text-xs mt-1">Configure your live status, shift schedules, overrides, and capacity limits.</p>
+      <div className="bg-white rounded-[24px] shadow-sm border border-slate-200/60 p-6 hover-card-trigger space-y-6">
+        <div className="border-b border-slate-100 pb-4">
+          <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">⚙️ Doctor & Queue Settings</h2>
+          <p className="text-slate-400 font-bold text-xs mt-1">Configure your live status, shift schedules, overrides, and capacity limits.</p>
         </div>
 
         <form onSubmit={handleSaveSettings} className="space-y-6">
@@ -1035,9 +1063,9 @@ export default function DoctorDashboard() {
           {/* Live operational settings */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Live Availability State</label>
+              <label className="block text-xs font-bold text-slate-550 uppercase tracking-wider mb-2">Live Availability State</label>
               <select
-                className="w-full border border-gray-300 rounded-lg p-2.5 text-sm"
+                className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-blue-500 focus:outline-none bg-white font-bold text-slate-700"
                 value={settingsForm.availabilityState}
                 onChange={(e) => setSettingsForm(prev => ({ ...prev, availabilityState: e.target.value }))}
               >
@@ -1049,9 +1077,9 @@ export default function DoctorDashboard() {
 
             {settingsForm.availabilityState === "unavailable" && (
               <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Unavailable Session Policy</label>
+                <label className="block text-xs font-bold text-slate-550 uppercase tracking-wider mb-2">Unavailable Session Policy</label>
                 <select
-                  className="w-full border border-gray-300 rounded-lg p-2.5 text-sm"
+                  className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-blue-500 focus:outline-none bg-white font-bold text-slate-700"
                   value={settingsForm.sessionPolicy}
                   onChange={(e) => setSettingsForm(prev => ({ ...prev, sessionPolicy: e.target.value }))}
                 >
@@ -1065,22 +1093,22 @@ export default function DoctorDashboard() {
 
           {/* Temporary notice inputs */}
           {settingsForm.availabilityState === "break" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-4 bg-yellow-50 rounded-xl border border-yellow-100">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 bg-amber-500/5 rounded-2xl border border-amber-500/10">
               <div>
-                <label className="block text-xs font-bold text-yellow-850 uppercase mb-2">Temporary Notice Message</label>
+                <label className="block text-xs font-bold text-amber-800 uppercase tracking-wider mb-2">Temporary Notice Message</label>
                 <input
                   type="text"
                   placeholder="e.g. Away for lunch, back in 20 mins"
-                  className="w-full border border-gray-300 rounded-lg p-2.5 text-sm"
+                  className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-blue-500 focus:outline-none bg-white font-bold text-slate-700"
                   value={settingsForm.temporaryNoticeMessage}
                   onChange={(e) => setSettingsForm(prev => ({ ...prev, temporaryNoticeMessage: e.target.value }))}
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-yellow-850 uppercase mb-2">Expected Return Time</label>
+                <label className="block text-xs font-bold text-amber-800 uppercase tracking-wider mb-2">Expected Return Time</label>
                 <input
                   type="datetime-local"
-                  className="w-full border border-gray-300 rounded-lg p-2.5 text-sm"
+                  className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-blue-500 focus:outline-none bg-white font-bold text-slate-700"
                   value={settingsForm.temporaryNoticeExpectedUntil}
                   onChange={(e) => setSettingsForm(prev => ({ ...prev, temporaryNoticeExpectedUntil: e.target.value }))}
                 />
@@ -1091,23 +1119,23 @@ export default function DoctorDashboard() {
           {/* Capacities */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Default Queue Capacity Limit</label>
+              <label className="block text-xs font-bold text-slate-550 uppercase tracking-wider mb-2">Default Queue Capacity Limit</label>
               <input
                 type="number"
                 min="1"
                 max="200"
-                className="w-full border border-gray-300 rounded-lg p-2.5 text-sm"
+                className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-blue-500 focus:outline-none font-bold text-slate-700"
                 value={settingsForm.defaultQueueLimit}
                 onChange={(e) => setSettingsForm(prev => ({ ...prev, defaultQueueLimit: e.target.value }))}
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Average Consultation Time (Minutes)</label>
+              <label className="block text-xs font-bold text-slate-550 uppercase tracking-wider mb-2">Average Consultation Time (Minutes)</label>
               <input
                 type="number"
                 min="1"
                 max="90"
-                className="w-full border border-gray-300 rounded-lg p-2.5 text-sm"
+                className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-blue-500 focus:outline-none font-bold text-slate-700"
                 value={settingsForm.avgConsultationTime}
                 onChange={(e) => setSettingsForm(prev => ({ ...prev, avgConsultationTime: e.target.value }))}
               />
@@ -1116,11 +1144,11 @@ export default function DoctorDashboard() {
 
           {/* Weekday Schedule */}
           <div>
-            <h3 className="text-sm font-bold text-gray-700 mb-3">🕒 Weekly Operating Hours</h3>
+            <h3 className="text-sm font-extrabold text-slate-700 tracking-tight mb-3">🕒 Weekly Operating Hours</h3>
             <div className="space-y-3">
               {settingsForm.schedules.map((sch, idx) => (
-                <div key={sch.dayOfWeek} className="flex flex-wrap items-center justify-between gap-4 p-3 bg-gray-50 rounded-xl border">
-                  <div className="flex items-center gap-3 w-32">
+                <div key={sch.dayOfWeek} className="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-50/50 rounded-2xl border border-slate-100">
+                  <div className="flex items-center gap-3 w-36">
                     <input
                       type="checkbox"
                       id={`sch-chk-${sch.dayOfWeek}`}
@@ -1128,7 +1156,7 @@ export default function DoctorDashboard() {
                       onChange={(e) => handleScheduleChange(idx, "enabled", e.target.checked)}
                       className="rounded text-blue-600 focus:ring-blue-500"
                     />
-                    <label htmlFor={`sch-chk-${sch.dayOfWeek}`} className="text-sm font-semibold text-gray-700">
+                    <label htmlFor={`sch-chk-${sch.dayOfWeek}`} className="text-sm font-semibold text-slate-700">
                       {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][sch.dayOfWeek]}
                     </label>
                   </div>
@@ -1137,22 +1165,22 @@ export default function DoctorDashboard() {
                       <input
                         type="text"
                         placeholder="HH:MM"
-                        className="border rounded px-2.5 py-1 text-sm w-20 text-center font-mono"
+                        className="border border-slate-200 rounded-lg px-2.5 py-1 text-sm w-20 text-center font-mono focus:border-blue-500 focus:outline-none font-bold text-slate-700 bg-white"
                         value={sch.startTime}
                         onChange={(e) => handleScheduleChange(idx, "startTime", e.target.value)}
                       />
-                      <span className="text-gray-400 text-xs">to</span>
+                      <span className="text-slate-400 text-xs">to</span>
                       <input
                         type="text"
                         placeholder="HH:MM"
-                        className="border rounded px-2.5 py-1 text-sm w-20 text-center font-mono"
+                        className="border border-slate-200 rounded-lg px-2.5 py-1 text-sm w-20 text-center font-mono focus:border-blue-500 focus:outline-none font-bold text-slate-700 bg-white"
                         value={sch.endTime}
                         onChange={(e) => handleScheduleChange(idx, "endTime", e.target.value)}
                       />
                     </div>
                   )}
                   {!sch.enabled && (
-                    <span className="text-xs text-gray-400 font-medium italic">Off-duty</span>
+                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider italic mr-4">Off-duty</span>
                   )}
                 </div>
               ))}
@@ -1162,46 +1190,46 @@ export default function DoctorDashboard() {
           {/* Schedule Overrides */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-gray-700">📅 Schedule Overrides & Holidays</h3>
+              <h3 className="text-sm font-extrabold text-slate-700 tracking-tight">📅 Schedule Overrides & Holidays</h3>
               <button
                 type="button"
                 onClick={handleAddOverride}
-                className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 font-semibold px-3 py-1.5 rounded-lg border border-blue-200 transition"
+                className="text-xs bg-blue-50 text-blue-650 hover:bg-blue-100 font-black px-4 py-2 rounded-xl border border-blue-200 transition-all active:scale-95 cursor-pointer"
               >
                 + Add Override
               </button>
             </div>
             {settingsForm.overrides.length === 0 ? (
-              <p className="text-xs text-gray-400 italic bg-gray-50 p-4 rounded-xl border text-center">No overrides configured.</p>
+              <p className="text-xs text-slate-400 italic bg-slate-50/50 p-5 rounded-2xl border border-slate-100 text-center font-bold">No overrides configured.</p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-3.5">
                 {settingsForm.overrides.map((ovr, idx) => (
-                  <div key={idx} className="flex flex-wrap items-center justify-between gap-4 p-3.5 bg-gray-50 rounded-xl border border-gray-200">
+                  <div key={idx} className="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-50/50 rounded-2xl border border-slate-200/60 shadow-2xs">
                     <div className="flex flex-wrap items-center gap-3">
                       <input
                         type="date"
-                        className="border rounded px-2.5 py-1.5 text-sm font-medium"
+                        className="border border-slate-200 rounded-xl px-3.5 py-1.5 text-sm font-bold text-slate-700 focus:border-blue-500 focus:outline-none bg-white"
                         value={ovr.date}
                         onChange={(e) => handleOverrideChange(idx, "date", e.target.value)}
                       />
                       
-                      <label className="flex items-center gap-1.5 text-xs text-gray-600 font-semibold">
+                      <label className="flex items-center gap-1.5 text-xs text-slate-500 font-bold select-none cursor-pointer">
                         <input
                           type="checkbox"
                           checked={ovr.enabled}
                           onChange={(e) => handleOverrideChange(idx, "enabled", e.target.checked)}
-                          className="rounded text-blue-600"
+                          className="rounded text-blue-650 focus:ring-blue-500"
                         />
                         Working
                       </label>
 
                       {ovr.enabled && (
-                        <label className="flex items-center gap-1.5 text-xs text-gray-600 font-semibold">
+                        <label className="flex items-center gap-1.5 text-xs text-slate-500 font-bold select-none cursor-pointer">
                           <input
                             type="checkbox"
                             checked={ovr.isFullDay}
                             onChange={(e) => handleOverrideChange(idx, "isFullDay", e.target.checked)}
-                            className="rounded text-blue-600"
+                            className="rounded text-blue-650 focus:ring-blue-500"
                           />
                           Full Day Leave
                         </label>
@@ -1213,27 +1241,27 @@ export default function DoctorDashboard() {
                         <input
                           type="text"
                           placeholder="HH:MM"
-                          className="border rounded px-2 py-1 text-xs w-16 text-center font-mono"
+                          className="border border-slate-200 rounded-lg px-2.5 py-1 text-xs w-16 text-center font-mono focus:border-blue-500 focus:outline-none font-bold text-slate-700 bg-white"
                           value={ovr.startTime}
                           onChange={(e) => handleOverrideChange(idx, "startTime", e.target.value)}
                         />
-                        <span className="text-gray-400 text-[10px]">to</span>
+                        <span className="text-slate-400 text-[10px]">to</span>
                         <input
                           type="text"
                           placeholder="HH:MM"
-                          className="border rounded px-2 py-1 text-xs w-16 text-center font-mono"
+                          className="border border-slate-200 rounded-lg px-2.5 py-1 text-xs w-16 text-center font-mono focus:border-blue-500 focus:outline-none font-bold text-slate-700 bg-white"
                           value={ovr.endTime}
                           onChange={(e) => handleOverrideChange(idx, "endTime", e.target.value)}
                         />
                       </div>
                     ) : (
-                      <span className="text-xs text-red-500 font-bold bg-red-50 border border-red-100 rounded px-2.5 py-0.5">Holiday/Leave</span>
+                      <span className="text-xs text-rose-500 font-black bg-rose-50 border border-rose-100 rounded-lg px-3 py-1 uppercase tracking-wider">Holiday/Leave</span>
                     )}
 
                     <button
                       type="button"
                       onClick={() => handleRemoveOverride(idx)}
-                      className="text-xs text-red-500 hover:text-red-700 font-semibold px-2 py-1"
+                      className="text-xs text-rose-500 hover:text-rose-700 font-bold px-3 py-1 hover:bg-rose-50 rounded-xl transition border-none bg-transparent cursor-pointer"
                     >
                       Delete
                     </button>
@@ -1243,10 +1271,10 @@ export default function DoctorDashboard() {
             )}
           </div>
 
-          <div className="pt-4 border-t flex justify-end">
+          <div className="pt-4 border-t border-slate-100 flex justify-end">
             <button
               type="submit"
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-xl transition text-sm shadow active:scale-98"
+              className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold px-6 py-3 rounded-xl transition-all text-xs shadow-md active:scale-98 border-none cursor-pointer"
             >
               Save Doctor Settings
             </button>
@@ -1257,11 +1285,11 @@ export default function DoctorDashboard() {
 
       {/* ── Clinical Modal (EMR Entry/Edit) ─────────────────────────────────── */}
       {clinicalModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl border shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-250">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-3xl border border-slate-200/50 shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-250">
             {/* Header */}
-            <div className="bg-gray-50 border-b px-6 py-4 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-gray-800">
+            <div className="bg-slate-50 border-b border-slate-100 px-6 py-4 flex items-center justify-between">
+              <h3 className="text-lg font-extrabold text-slate-800 tracking-tight">
                 {editingVisitId ? "Edit Medical Summary (EMR)" : "Complete Consultation & Record EMR"}
               </h3>
               <button
@@ -1270,7 +1298,7 @@ export default function DoctorDashboard() {
                   setClinicalModalOpen(false);
                   setEditingVisitId(null);
                 }}
-                className="text-gray-400 hover:text-gray-600 text-xl font-bold p-1"
+                className="text-slate-400 hover:text-slate-600 text-xl font-extrabold p-2 rounded-xl hover:bg-slate-100 transition border-none bg-transparent cursor-pointer"
               >
                 ✕
               </button>
@@ -1279,47 +1307,47 @@ export default function DoctorDashboard() {
             {/* Form */}
             <form onSubmit={handleSubmitClinicalForm} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
               <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Chief Complaint *</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Chief Complaint *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Chronic headache, high fever"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500 focus:outline-none font-bold text-slate-700"
                   value={clinicalForm.chiefComplaint}
                   onChange={(e) => setClinicalForm(prev => ({ ...prev, chiefComplaint: e.target.value }))}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Consultation Summary *</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Consultation Summary *</label>
                 <textarea
                   required
                   rows="3"
                   placeholder="Diagnosed migraine, advice rest..."
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500 focus:outline-none font-bold text-slate-700"
                   value={clinicalForm.consultationSummary}
                   onChange={(e) => setClinicalForm(prev => ({ ...prev, consultationSummary: e.target.value }))}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Doctor Notes (EMR Sensitive) *</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Doctor Notes (EMR Sensitive) *</label>
                 <textarea
                   required
                   rows="3"
                   placeholder="Clinical observations, vital stats..."
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500 focus:outline-none font-bold text-slate-700"
                   value={clinicalForm.doctorNotes}
                   onChange={(e) => setClinicalForm(prev => ({ ...prev, doctorNotes: e.target.value }))}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Follow-up Advice</label>
+                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Follow-up Advice</label>
                 <textarea
                   rows="2"
                   placeholder="e.g. Review in 7 days if symptom persists"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500 focus:outline-none font-bold text-slate-700"
                   value={clinicalForm.followUpAdvice}
                   onChange={(e) => setClinicalForm(prev => ({ ...prev, followUpAdvice: e.target.value }))}
                 />
@@ -1327,9 +1355,9 @@ export default function DoctorDashboard() {
 
               {!editingVisitId && (
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">Visit Outcome *</label>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Visit Outcome *</label>
                   <select
-                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white"
+                    className="w-full border border-slate-200 rounded-xl px-3.5 py-2 text-sm focus:border-blue-500 focus:outline-none bg-white font-bold text-slate-700"
                     value={clinicalForm.visitOutcome}
                     onChange={(e) => setClinicalForm(prev => ({ ...prev, visitOutcome: e.target.value }))}
                   >
@@ -1341,20 +1369,20 @@ export default function DoctorDashboard() {
               )}
 
               {/* Action Buttons */}
-              <div className="pt-4 border-t flex justify-end gap-3">
+              <div className="pt-4 border-t border-slate-150 flex justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => {
                     setClinicalModalOpen(false);
                     setEditingVisitId(null);
                   }}
-                  className="px-4 py-2 border rounded-lg hover:bg-gray-50 text-sm font-medium text-gray-600 transition"
+                  className="px-4 py-2 border border-slate-200 rounded-xl hover:bg-slate-50 text-xs font-bold text-slate-500 transition cursor-pointer bg-white"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold shadow-sm transition active:scale-95"
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition active:scale-95 cursor-pointer border-none"
                 >
                   {editingVisitId ? "Save Changes" : "Complete Visit"}
                 </button>

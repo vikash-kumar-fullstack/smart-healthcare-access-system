@@ -49,5 +49,20 @@ export const findMatchingSymptom = async (normalized) => {
     }
   }
 
+  // 5. Prefix-Length Fuzzy Match Fallback (e.g. "heache" -> "headache")
+  if (normalized.length >= 3) {
+    const prefix3 = normalized.slice(0, 3);
+    for (const symptom of allSymptoms) {
+      if (symptom.name.startsWith(prefix3) && Math.abs(symptom.name.length - normalized.length) <= 3) {
+        return symptom;
+      }
+      for (const alias of symptom.aliases) {
+        if (alias.startsWith(prefix3) && Math.abs(alias.length - normalized.length) <= 3) {
+          return symptom;
+        }
+      }
+    }
+  }
+
   return null;
 };

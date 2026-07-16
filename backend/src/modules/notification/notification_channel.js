@@ -3,12 +3,14 @@ import { emitToUser } from "../../utils/socket.js";
 class InAppDriver {
   async send(recipientUserId, title, body, metadata = {}, notificationId) {
     try {
-      const isOnline = emitToUser(recipientUserId, "notification", {
-        id: notificationId,
+      const { dispatchToUser } = await import("../realtime/event_dispatcher.js");
+      const eventDoc = await dispatchToUser(recipientUserId, "NOTIFICATION", {
+        id: notificationId.toString(),
         title,
         body,
         metadata
       });
+      const isOnline = eventDoc && eventDoc.status === "sent";
       return {
         success: true,
         status: isOnline ? "processing" : "queued"

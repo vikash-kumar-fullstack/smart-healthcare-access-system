@@ -8,8 +8,10 @@ import {
   ArrowLeftRight, 
   RefreshCw 
 } from "lucide-react";
+import { useRealtime } from "../../components/RealtimeProvider";
 
 export default function Queues() {
+  const { subscribe } = useRealtime() || {};
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -80,6 +82,27 @@ export default function Queues() {
     fetchSessions();
   }, []);
 
+  useEffect(() => {
+    if (!subscribe) return;
+    const handleUpdate = () => {
+      fetchSessions();
+    };
+
+    const unsubQueue = subscribe("QUEUE_UPDATED", handleUpdate);
+    const unsubVisitStart = subscribe("VISIT_STARTED", handleUpdate);
+    const unsubVisitComplete = subscribe("VISIT_COMPLETED", handleUpdate);
+    const unsubReassign = subscribe("QUEUE_REASSIGNED", handleUpdate);
+    const unsubPause = subscribe("SESSION_PAUSED", handleUpdate);
+
+    return () => {
+      unsubQueue();
+      unsubVisitStart();
+      unsubVisitComplete();
+      unsubReassign();
+      unsubPause();
+    };
+  }, [subscribe]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh] text-teal-400">
@@ -92,56 +115,56 @@ export default function Queues() {
   return (
     <div className="space-y-8">
       {error && (
-        <div className="bg-rose-500/10 border border-rose-500/30 text-rose-400 p-4 rounded-lg font-mono text-xs">
+        <div className="bg-rose-500/10 border border-rose-500/30 text-rose-650 p-4 rounded-xl font-mono text-xs text-left font-bold">
           <strong>ERROR:</strong> {error}
         </div>
       )}
 
-      {/* Grid of queue sessions */}
+      {/* Grid of active queue sessions */}
       <div className="space-y-4">
-        <h3 className="text-md font-bold font-mono text-slate-100 border-b border-slate-800 pb-2 flex items-center gap-2">
-          <GitCommit className="w-4 h-4 text-teal-400" />
+        <h3 className="text-md font-bold text-slate-800 pb-2 flex items-center gap-2 text-left">
+          <GitCommit className="w-4 h-4 text-[#0E7490]" />
           Active Queue Sessions
         </h3>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {sessions.map((sess) => (
-            <div key={sess._id} className="bg-slate-950/40 p-5 rounded-xl border border-slate-800 backdrop-blur shadow-md flex flex-col justify-between space-y-4">
+            <div key={sess._id} className="bg-white p-6 rounded-2xl border border-slate-200/50 hover:shadow-md transition-all duration-205 shadow-sm flex flex-col justify-between space-y-4 text-left">
               <div className="space-y-2">
                 <div className="flex justify-between items-start">
                   <div>
-                    <h4 className="font-bold text-slate-100 text-sm">Dr. {sess.doctorId?.name || "Unknown Doctor"}</h4>
-                    <p className="text-xs text-slate-400 font-mono mt-0.5">Session Date: {sess.date}</p>
+                    <h4 className="font-extrabold text-slate-850 text-sm">Dr. {sess.doctorId?.name || "Unknown Doctor"}</h4>
+                    <p className="text-xs text-slate-500 font-mono mt-0.5">Session Date: {sess.date}</p>
                   </div>
                   <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
                     sess.sessionStatus === "active"
-                      ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                      ? "bg-emerald-50 text-emerald-600 border border-emerald-100/50"
                       : sess.sessionStatus === "paused"
-                      ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                      : "bg-rose-500/10 text-rose-400 border border-rose-500/20"
+                      ? "bg-amber-50 text-amber-600 border border-amber-100/50"
+                      : "bg-rose-50 text-rose-600 border border-rose-100/50"
                   }`}>
                     {sess.sessionStatus}
                   </span>
                 </div>
 
-                <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 text-xs font-mono grid grid-cols-2 gap-2">
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-150 text-xs font-mono grid grid-cols-2 gap-2">
                   <div>
-                    <span className="text-slate-400 block text-[10px]">Queue Number</span>
-                    <span className="text-slate-200 text-sm font-bold">{sess.currentQueueNumber || 0}</span>
+                    <span className="text-slate-500 block text-[10px]">Queue Number</span>
+                    <span className="text-slate-700 text-sm font-bold">{sess.currentQueueNumber || 0}</span>
                   </div>
                   <div>
-                    <span className="text-slate-400 block text-[10px]">Capacity Limit</span>
-                    <span className="text-slate-200 text-sm font-bold">{sess.maxQueueLimit || 50}</span>
+                    <span className="text-slate-500 block text-[10px]">Capacity Limit</span>
+                    <span className="text-slate-700 text-sm font-bold">{sess.maxQueueLimit || 50}</span>
                   </div>
                 </div>
               </div>
 
               {/* Session Control Buttons */}
-              <div className="border-t border-slate-800/80 pt-3 flex gap-2">
+              <div className="border-t border-slate-150 pt-4 flex gap-2">
                 {sess.sessionStatus === "active" && (
                   <button
                     onClick={() => handleOverride(sess._id, "pause")}
-                    className="flex-1 flex items-center justify-center gap-1 bg-slate-900 border border-slate-800 hover:bg-amber-600/10 hover:text-amber-400 hover:border-amber-500/20 text-slate-300 font-semibold py-1.5 rounded-lg text-xs transition duration-200"
+                    className="flex-1 flex items-center justify-center gap-1 bg-slate-50 border border-slate-200 hover:bg-amber-50 hover:text-amber-600 hover:border-amber-200 text-slate-500 font-bold py-1.5 rounded-lg text-xs transition duration-205 cursor-pointer"
                   >
                     <Pause className="w-3.5 h-3.5" />
                     Pause
@@ -151,7 +174,7 @@ export default function Queues() {
                 {sess.sessionStatus === "paused" && (
                   <button
                     onClick={() => handleOverride(sess._id, "reopen")}
-                    className="flex-1 flex items-center justify-center gap-1 bg-slate-900 border border-slate-800 hover:bg-emerald-600/10 hover:text-emerald-400 hover:border-emerald-500/20 text-slate-300 font-semibold py-1.5 rounded-lg text-xs transition duration-200"
+                    className="flex-1 flex items-center justify-center gap-1 bg-slate-50 border border-slate-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 text-slate-500 font-bold py-1.5 rounded-lg text-xs transition duration-205 cursor-pointer"
                   >
                     <Play className="w-3.5 h-3.5" />
                     Resume
@@ -161,7 +184,7 @@ export default function Queues() {
                 {sess.sessionStatus !== "closed" && (
                   <button
                     onClick={() => handleOverride(sess._id, "close")}
-                    className="flex-1 flex items-center justify-center gap-1 bg-slate-900 border border-slate-800 hover:bg-rose-600/10 hover:text-rose-400 hover:border-rose-500/20 text-slate-300 font-semibold py-1.5 rounded-lg text-xs transition duration-200"
+                    className="flex-1 flex items-center justify-center gap-1 bg-slate-50 border border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-500 font-bold py-1.5 rounded-lg text-xs transition duration-205 cursor-pointer"
                   >
                     <XSquare className="w-3.5 h-3.5" />
                     Force Close
@@ -171,7 +194,7 @@ export default function Queues() {
                 {sess.sessionStatus === "closed" && (
                   <button
                     onClick={() => handleOverride(sess._id, "reopen")}
-                    className="flex-1 flex items-center justify-center gap-1 bg-slate-900 border border-slate-800 hover:bg-emerald-600/10 hover:text-emerald-400 hover:border-emerald-500/20 text-slate-300 font-semibold py-1.5 rounded-lg text-xs transition duration-200"
+                    className="flex-1 flex items-center justify-center gap-1 bg-slate-50 border border-slate-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200 text-slate-500 font-bold py-1.5 rounded-lg text-xs transition duration-205 cursor-pointer"
                   >
                     <Play className="w-3.5 h-3.5" />
                     Reopen
@@ -184,16 +207,16 @@ export default function Queues() {
       </div>
 
       {/* Patient Reassignment Form */}
-      <div className="bg-slate-950/45 p-6 rounded-xl border border-slate-800 shadow-lg space-y-4 max-w-xl">
-        <h4 className="font-bold text-slate-100 tracking-wide font-mono border-b border-slate-800 pb-3 flex items-center gap-2">
-          <ArrowLeftRight className="w-4 h-4 text-teal-400" />
+      <div className="bg-white p-6 rounded-2xl border border-slate-200/50 hover:shadow-md transition-all duration-200 shadow-sm space-y-4 max-w-xl text-left">
+        <h4 className="font-extrabold text-slate-800 tracking-tight border-b border-slate-100 pb-3 flex items-center gap-2">
+          <ArrowLeftRight className="w-4 h-4 text-[#0E7490]" />
           Patient Queue Reassignment (Intervention Override)
         </h4>
 
         <form onSubmit={handleReassign} className="space-y-4 text-sm font-sans">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold block mb-1">
+              <label className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold block mb-1">
                 Queue Entry / Booking ID
               </label>
               <input
@@ -202,12 +225,12 @@ export default function Queues() {
                 placeholder="e.g. 603f90..."
                 value={entryId}
                 onChange={(e) => setEntryId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs focus:border-teal-500 outline-none text-slate-200 font-mono"
+                className="w-full bg-white border border-slate-250 rounded-lg px-3 py-2 text-xs focus:border-[#0E7490] outline-none text-slate-700 font-mono"
               />
             </div>
 
             <div>
-              <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold block mb-1">
+              <label className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold block mb-1">
                 Target Doctor ID
               </label>
               <input
@@ -216,13 +239,13 @@ export default function Queues() {
                 placeholder="e.g. 603f92..."
                 value={targetDoctorId}
                 onChange={(e) => setTargetDoctorId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs focus:border-teal-500 outline-none text-slate-200 font-mono"
+                className="w-full bg-white border border-slate-250 rounded-lg px-3 py-2 text-xs focus:border-[#0E7490] outline-none text-slate-700 font-mono"
               />
             </div>
           </div>
 
           <div>
-            <label className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold block mb-1">
+            <label className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold block mb-1">
               Reassignment Justification Reason
             </label>
             <input
@@ -231,14 +254,14 @@ export default function Queues() {
               placeholder="e.g. Doctor schedule delayed, re-routing to equivalent cardiologist"
               value={reassignReason}
               onChange={(e) => setReassignReason(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs focus:border-teal-500 outline-none text-slate-200"
+              className="w-full bg-white border border-slate-250 rounded-lg px-3 py-2 text-xs focus:border-[#0E7490] outline-none text-slate-700"
             />
           </div>
 
           <button
             type="submit"
             disabled={submitting}
-            className="w-full bg-teal-500 hover:bg-teal-600 active:bg-teal-700 text-slate-950 font-bold py-2.5 rounded-lg text-xs transition duration-200 disabled:opacity-50 font-mono"
+            className="w-full bg-[#14B8A6] hover:bg-[#119f90] text-white font-bold py-2.5 rounded-lg text-xs transition duration-200 disabled:opacity-50 font-mono cursor-pointer border-none shadow-sm"
           >
             {submitting ? "Processing Override..." : "Execute Reassignment"}
           </button>

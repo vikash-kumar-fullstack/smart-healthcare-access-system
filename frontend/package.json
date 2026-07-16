@@ -7,6 +7,26 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "verify:locks": "node scripts/verify-frontend-locks.js",
+    "audit:frontend": "node scripts/frontend-audit.js",
+    "screenshot": "node scripts/visual-review.js",
+    "verify:journeys": "node scripts/journey-test.js",
+    "verify:cta": "node scripts/verify-cta.js",
+    "verify:session": "node scripts/verify-session.js",
+    "verify:recovery": "node scripts/verify-recovery.js",
+    "verify:lighthouse": "node scripts/lighthouse-check.js",
+    "verify:design-system": "node scripts/verify-design-system.js",
+    "verify:ui-consistency": "node scripts/verify-ui-consistency.js",
+    "verify:animations": "node scripts/verify-ui-animations.js",
+    "verify:visual": "node scripts/verify-visual-regression.js",
+    "verify:accessibility": "node scripts/verify-ui-accessibility.js",
+    "verify:dashboard-state": "node scripts/verify-dashboard-state.js",
+    "verify:responsive": "node scripts/verify-responsive.js",
+    "verify:frontend-performance": "node scripts/verify-frontend-performance.js",
+    "analyze:bundle": "node scripts/analyze-bundle.js",
+    "verify:empty-states": "node scripts/verify-empty-states.js",
+    "demo:reset": "node ../backend/scripts/demo-reset.js",
+    "demo:seed": "node ../backend/scripts/demo-seed.js",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -15,7 +35,8 @@
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-hot-toast": "^2.6.0",
-    "react-router-dom": "^7.14.2"
+    "react-router-dom": "^7.14.2",
+    "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -29,6 +50,7 @@
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
     "postcss": "^8.5.12",
+    "puppeteer-core": "^24.43.1",
     "tailwindcss": "^4.2.4",
     "vite": "^8.0.10"
   }

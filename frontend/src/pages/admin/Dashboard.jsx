@@ -9,8 +9,10 @@ import {
   Activity, 
   RefreshCw 
 } from "lucide-react";
+import { useRealtime } from "../../components/RealtimeProvider";
 
 export default function Dashboard() {
+  const { subscribe } = useRealtime() || {};
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -50,6 +52,25 @@ export default function Dashboard() {
     fetchDashboardData();
   }, []);
 
+  useEffect(() => {
+    if (!subscribe) return;
+    const handleUpdate = () => {
+      fetchDashboardData();
+    };
+
+    const unsubQueue = subscribe("QUEUE_UPDATED", handleUpdate);
+    const unsubVisitStart = subscribe("VISIT_STARTED", handleUpdate);
+    const unsubVisitComplete = subscribe("VISIT_COMPLETED", handleUpdate);
+    const unsubReassign = subscribe("QUEUE_REASSIGNED", handleUpdate);
+
+    return () => {
+      unsubQueue();
+      unsubVisitStart();
+      unsubVisitComplete();
+      unsubReassign();
+    };
+  }, [subscribe]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh] text-teal-400">
@@ -67,7 +88,15 @@ export default function Dashboard() {
     );
   }
 
-  const kpis = [
+  const isHospital = !!data?.isHospitalAdmin;
+
+  const kpis = isHospital ? [
+    { name: "Active Doctors", value: data?.activeDoctors ?? 0, icon: UserSquare, color: "text-sky-400" },
+    { name: "Registered Patients", value: data?.activePatients ?? 0, icon: Users, color: "text-indigo-400" },
+    { name: "Bookings Today", value: data?.bookings ?? 0, icon: Calendar, color: "text-amber-400" },
+    { name: "Completion Rate", value: `${data?.completionRate ?? 0}%`, icon: Percent, color: "text-teal-400" },
+    { name: "No Show Rate", value: `${data?.noShowRate ?? 0}%`, icon: Percent, color: "text-rose-400" }
+  ] : [
     { name: "Active Hospitals", value: data?.activeHospitals ?? 0, icon: Building, color: "text-emerald-400" },
     { name: "Active Doctors", value: data?.activeDoctors ?? 0, icon: UserSquare, color: "text-sky-400" },
     { name: "Registered Patients", value: data?.activePatients ?? 0, icon: Users, color: "text-indigo-400" },
@@ -79,87 +108,119 @@ export default function Dashboard() {
   ];
 
   return (
-    <div className="space-y-6">
-      {/* Overview stats header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-slate-950/40 p-6 rounded-xl border border-slate-800 backdrop-blur">
-        <div>
-          <h3 className="text-xl font-bold text-slate-100 tracking-wide font-mono">District Operations Dashboard</h3>
-          <p className="text-sm text-slate-400 mt-1">Aggregated statistics compiled asynchronously. Dashboard Version: <span className="font-mono text-teal-400 font-semibold">{data?.dashboardVersion || 3}</span></p>
+    <div className="flex flex-col gap-8 text-left animate-fade-in-up">
+      <style>{`
+        @keyframes fadeInUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+        .animate-fade-in-up {
+          animation: fadeInUp 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .hover-card-trigger {
+          transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .hover-card-trigger:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 20px 40px -15px rgba(15, 76, 129, 0.06);
+        }
+      `}</style>
+
+      {/* Overview stats header (Light Theme Gradient) */}
+      <div className="bg-gradient-to-br from-[#0F4C81] to-[#0A5F76] text-white p-8 rounded-[32px] shadow-xl relative overflow-hidden flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 text-left hover-card-trigger">
+        <div className="absolute top-0 right-0 w-80 h-80 bg-white/5 rounded-full blur-3xl pointer-events-none transform translate-x-10 -translate-y-10" />
+        <div className="relative z-10">
+          <h3 className="text-2xl font-black text-white tracking-tight">
+            {isHospital ? "Hospital Operations Dashboard" : "Super Admin Operations Dashboard"}
+          </h3>
+          <p className="text-xs text-cyan-105 mt-1 font-semibold">
+            {isHospital 
+              ? `${data.hospitalName || "Partnered Hospital"} Administrative Console` 
+              : `Aggregated statistics compiled asynchronously. Dashboard Version: ${data?.dashboardVersion || 3}`}
+          </p>
         </div>
         <button
           onClick={handleManualRefresh}
           disabled={refreshing}
-          className="flex items-center justify-center gap-2 bg-teal-500 hover:bg-teal-600 active:bg-teal-700 text-slate-950 font-bold px-4 py-2.5 rounded-lg text-sm transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed shrink-0 shadow-lg shadow-teal-500/10"
+          className="relative z-10 flex items-center justify-center gap-2 bg-[#14B8A6] hover:bg-[#119f90] active:bg-[#0e8376] text-white font-extrabold px-6 h-12 rounded-xl text-xs transition duration-200 disabled:opacity-50 disabled:cursor-not-allowed shrink-0 shadow-md cursor-pointer border-none"
         >
           <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
           Force Recalculate Cache
         </button>
       </div>
 
-      {/* Grid widgets */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Grid widgets (Clean White Cards) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {kpis.map((kpi) => {
           const Icon = kpi.icon;
           return (
-            <div key={kpi.name} className="bg-slate-950/40 p-5 rounded-xl border border-slate-800 hover:border-slate-700 transition-all duration-200 flex items-center justify-between group shadow-md">
+            <div key={kpi.name} className="bg-white p-6 rounded-3xl border border-slate-200/50 hover-card-trigger flex items-center justify-between group shadow-sm text-left">
               <div className="space-y-1">
-                <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                <span className="text-xs font-black text-slate-400 uppercase tracking-widest block">
                   {kpi.name}
                 </span>
-                <span className="text-2xl font-bold text-slate-100 tracking-tight font-mono">
+                <span className="text-3xl font-black text-slate-800 tracking-tight font-mono">
                   {kpi.value}
                 </span>
               </div>
-              <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg group-hover:border-slate-700 transition">
-                <Icon className={`w-6 h-6 ${kpi.color}`} />
+              <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl group-hover:bg-[#0E7490]/5 group-hover:border-[#0E7490]/10 transition">
+                <Icon className={`w-6 h-6 ${kpi.color.replace('400', '600')}`} />
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Extra layout section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-slate-950/40 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
-          <h4 className="font-bold text-slate-100 tracking-wide font-mono border-b border-slate-800 pb-3 flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-teal-400"></span>
-            System Cache Metadata
-          </h4>
-          <div className="grid grid-cols-2 gap-4 text-sm font-mono">
-            <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-800/80">
-              <div className="text-xs text-slate-400 font-semibold mb-1">Generated At</div>
-              <div className="text-slate-200 text-xs overflow-hidden text-ellipsis whitespace-nowrap">
-                {data?.generatedAt ? new Date(data.generatedAt).toLocaleString() : "N/A"}
+      {/* Extra layout section (Clean White Cards) */}
+      {!isHospital && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 text-left">
+          <div className="bg-white p-6 rounded-3xl border border-slate-200/50 shadow-sm space-y-5 hover-card-trigger">
+            <h4 className="font-black text-slate-800 tracking-tight border-b border-slate-100 pb-3 flex items-center gap-2 text-sm uppercase">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#14B8A6]"></span>
+              System Cache Metadata
+            </h4>
+            <div className="grid grid-cols-2 gap-4 text-sm font-mono">
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-150">
+                <div className="text-[10px] text-slate-400 uppercase font-black mb-1 tracking-wider">Generated At</div>
+                <div className="text-slate-700 text-xs font-black overflow-hidden text-ellipsis whitespace-nowrap">
+                  {data?.generatedAt ? new Date(data.generatedAt).toLocaleString() : "N/A"}
+                </div>
               </div>
-            </div>
-            <div className="bg-slate-900/50 p-4 rounded-lg border border-slate-800/80">
-              <div className="text-xs text-slate-400 font-semibold mb-1">Performance Mode</div>
-              <div className="text-emerald-400 font-bold uppercase tracking-wider text-xs">
-                Asynchronous Cache
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-150">
+                <div className="text-[10px] text-slate-400 uppercase font-black mb-1 tracking-wider">Performance Mode</div>
+                <div className="text-[#0E7490] font-black uppercase tracking-wider text-xs">
+                  Asynchronous Cache
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        <div className="bg-slate-950/40 p-6 rounded-xl border border-slate-800 shadow-md space-y-4">
-          <h4 className="font-bold text-slate-100 tracking-wide font-mono border-b border-slate-800 pb-3 flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
-            District State Machine
-          </h4>
-          <div className="space-y-2 text-xs">
-            <div className="flex justify-between items-center bg-slate-900/50 px-4 py-3 rounded-lg border border-slate-800/80">
-              <span className="text-slate-400 font-semibold">Active Mode</span>
-              <span className="text-teal-400 font-mono font-semibold uppercase">District Live Operations</span>
-            </div>
-            <div className="flex justify-between items-center bg-slate-900/50 px-4 py-3 rounded-lg border border-slate-800/80">
-              <span className="text-slate-400 font-semibold">Current State</span>
-              <span className={`font-mono font-bold uppercase ${data?.systemHealth === "healthy" ? "text-emerald-400" : data?.systemHealth === "degraded" ? "text-orange-400" : "text-rose-400"}`}>
-                {data?.systemHealth || "HEALTHY"}
-              </span>
+          <div className="bg-white p-6 rounded-3xl border border-slate-200/50 shadow-sm space-y-5 hover-card-trigger">
+            <h4 className="font-black text-slate-800 tracking-tight border-b border-slate-100 pb-3 flex items-center gap-2 text-sm uppercase">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#0F4C81]"></span>
+              Super Admin State Machine
+            </h4>
+            <div className="space-y-3 text-xs">
+              <div className="flex justify-between items-center bg-slate-50 px-4 py-3 rounded-2xl border border-slate-150">
+                <span className="text-slate-500 font-extrabold tracking-tight">Active Mode</span>
+                <span className="text-[#0F4C81] font-mono font-black uppercase text-[10px] tracking-wider">Global Live Operations</span>
+              </div>
+              <div className="flex justify-between items-center bg-slate-50 px-4 py-3 rounded-2xl border border-slate-150">
+                <span className="text-slate-500 font-extrabold tracking-tight">Current State</span>
+                <span className={`font-mono font-black uppercase text-[10px] tracking-wider ${data?.systemHealth === "healthy" ? "text-emerald-600" : data?.systemHealth === "degraded" ? "text-orange-600" : "text-rose-600"}`}>
+                  {data?.systemHealth || "HEALTHY"}
+                </span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -1,40 +1,59 @@
 import { useEffect, useState } from "react";
 import api from "../../services/api";
-
 import NotificationCard from "../../components/NotificationCard";
+import { useRealtime } from "../../components/RealtimeProvider";
 
 export default function Notifications() {
-
+  const { subscribe } = useRealtime() || {};
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const fetchNotifications = async () => {
-
     try {
-
       const res = await api.get("/notifications");
+      const rawData = res.data.data;
+      const data = Array.isArray(rawData)
+        ? rawData
+        : Array.isArray(rawData?.notifications)
+          ? rawData.notifications
+          : Array.isArray(rawData?.data)
+            ? rawData.data
+            : [];
+      setNotifications(data);
 
-      setNotifications(res.data.data);
-
+      await api.patch("/notifications/read-all").catch((err) => console.error("Notifications page clear error:", err));
+      window.dispatchEvent(new CustomEvent("notifications-updated"));
+      setNotifications(prev => prev.map(n => ({ ...n, status: "read", isRead: true })));
     } catch (err) {
-
       console.log(err);
-
     } finally {
-
       setLoading(false);
     }
   };
 
   useEffect(() => {
-
     fetchNotifications();
-
   }, []);
+
+  useEffect(() => {
+    const handleSync = () => {
+      setNotifications(prev => prev.map(n => ({ ...n, status: "read", isRead: true })));
+    };
+    window.addEventListener("notifications-updated", handleSync);
+    return () => window.removeEventListener("notifications-updated", handleSync);
+  }, []);
+
+  useEffect(() => {
+    if (!subscribe) return;
+    const unsub = subscribe("NOTIFICATION", () => {
+      fetchNotifications();
+    });
+    return unsub;
+  }, [subscribe]);
 
   if (loading) {
     return (
-      <div>
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm animate-pulse">
         Loading notifications...
       </div>
     );
@@ -49,8 +68,8 @@ export default function Notifications() {
 
       {notifications.length === 0 ? (
 
-        <div className="bg-white p-6 rounded shadow text-gray-500">
-          No notifications
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-500 shadow-sm">
+          No notifications yet
         </div>
 
       ) : (

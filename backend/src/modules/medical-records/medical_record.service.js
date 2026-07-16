@@ -320,7 +320,15 @@ export const getRecordDetail = async (recordId, userRole, userId) => {
   }
 
   // RBAC checks
-  if (userRole === "patient" && record.patientId.toString() !== userId.toString()) {
+  let isFamilyAllowed = false;
+  try {
+    const { hasFamilyAccess } = await import("../user/family.service.js");
+    isFamilyAllowed = await hasFamilyAccess(userId, record.patientId);
+  } catch (err) {
+    console.error("Family access check failed in medical record service:", err);
+  }
+
+  if (userRole === "patient" && record.patientId.toString() !== userId.toString() && !isFamilyAllowed) {
     throw Object.assign(new Error("Unauthorized access to medical record"), { status: 403 });
   }
 
@@ -389,7 +397,15 @@ export const getRecordDetail = async (recordId, userRole, userId) => {
 
 export const getPatientHistory = async (patientId, userRole, userId, limit = 10, cursor = null) => {
   // RBAC
-  if (userRole === "patient" && patientId.toString() !== userId.toString()) {
+  let isFamilyAllowed = false;
+  try {
+    const { hasFamilyAccess } = await import("../user/family.service.js");
+    isFamilyAllowed = await hasFamilyAccess(userId, patientId);
+  } catch (err) {
+    console.error("Family access check failed in medical history service:", err);
+  }
+
+  if (userRole === "patient" && patientId.toString() !== userId.toString() && !isFamilyAllowed) {
     throw Object.assign(new Error("Unauthorized access to medical history"), { status: 403 });
   }
 

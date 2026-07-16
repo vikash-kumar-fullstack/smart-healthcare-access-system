@@ -1,10 +1,12 @@
 import Doctor from "../doctor/doctor.model.js";
-import { logAdminAudit, logAdminAction } from "./admin.service.js";
+import { logAdminAudit, logAdminAction, getAdminActionByKey } from "./admin.service.js";
 import { createNotification } from "../notification/notification.service.js";
 import mongoose from "mongoose";
+import { paginate } from "../../utils/pagination.js";
 
-export const getDoctors = async () => {
-  return await Doctor.find({}).populate("userId").populate("hospitalId");
+export const getDoctors = async (hospitalId = null, queryOptions = {}) => {
+  const query = hospitalId ? { hospitalId } : {};
+  return await paginate(Doctor, queryOptions, query, ["userId", "hospitalId"]);
 };
 
 export const getDoctorById = async (doctorId) => {
@@ -16,6 +18,14 @@ export const getDoctorById = async (doctorId) => {
 };
 
 export const approveDoctor = async (adminUserId, doctorId, reason, requestId = "") => {
+  const commandKey = requestId ? `APPROVE_DOCTOR_${doctorId}_${requestId}` : null;
+  if (commandKey) {
+    const existing = await getAdminActionByKey(commandKey);
+    if (existing) {
+      return existing.responseBody;
+    }
+  }
+
   const doctorBefore = await Doctor.findById(doctorId);
   if (!doctorBefore) {
     throw Object.assign(new Error("Doctor profile not found"), { status: 404 });
@@ -40,7 +50,14 @@ export const approveDoctor = async (adminUserId, doctorId, reason, requestId = "
   }
 
   const correlationId = new mongoose.Types.ObjectId().toString();
-  await logAdminAction(adminUserId, "APPROVE_DOCTOR", { doctorId }, correlationId);
+  await logAdminAction(
+    adminUserId,
+    "APPROVE_DOCTOR",
+    { doctorId },
+    correlationId,
+    commandKey,
+    updated.toObject()
+  );
   await logAdminAudit(adminUserId, "APPROVE_DOCTOR", "Doctor", doctorId, beforeObj, updated.toObject(), reason, requestId);
 
   // Enqueue notification outbox (Correction 7)
@@ -61,6 +78,14 @@ export const approveDoctor = async (adminUserId, doctorId, reason, requestId = "
 };
 
 export const verifyDoctor = async (adminUserId, doctorId, reason, requestId = "") => {
+  const commandKey = requestId ? `VERIFY_DOCTOR_${doctorId}_${requestId}` : null;
+  if (commandKey) {
+    const existing = await getAdminActionByKey(commandKey);
+    if (existing) {
+      return existing.responseBody;
+    }
+  }
+
   const doctorBefore = await Doctor.findById(doctorId);
   if (!doctorBefore) {
     throw Object.assign(new Error("Doctor profile not found"), { status: 404 });
@@ -83,13 +108,28 @@ export const verifyDoctor = async (adminUserId, doctorId, reason, requestId = ""
   }
 
   const correlationId = new mongoose.Types.ObjectId().toString();
-  await logAdminAction(adminUserId, "VERIFY_DOCTOR", { doctorId }, correlationId);
+  await logAdminAction(
+    adminUserId,
+    "VERIFY_DOCTOR",
+    { doctorId },
+    correlationId,
+    commandKey,
+    updated.toObject()
+  );
   await logAdminAudit(adminUserId, "VERIFY_DOCTOR", "Doctor", doctorId, beforeObj, updated.toObject(), reason, requestId);
 
   return updated;
 };
 
 export const suspendDoctor = async (adminUserId, doctorId, reason, requestId = "") => {
+  const commandKey = requestId ? `SUSPEND_DOCTOR_${doctorId}_${requestId}` : null;
+  if (commandKey) {
+    const existing = await getAdminActionByKey(commandKey);
+    if (existing) {
+      return existing.responseBody;
+    }
+  }
+
   const doctorBefore = await Doctor.findById(doctorId);
   if (!doctorBefore) {
     throw Object.assign(new Error("Doctor profile not found"), { status: 404 });
@@ -112,7 +152,14 @@ export const suspendDoctor = async (adminUserId, doctorId, reason, requestId = "
   }
 
   const correlationId = new mongoose.Types.ObjectId().toString();
-  await logAdminAction(adminUserId, "SUSPEND_DOCTOR", { doctorId }, correlationId);
+  await logAdminAction(
+    adminUserId,
+    "SUSPEND_DOCTOR",
+    { doctorId },
+    correlationId,
+    commandKey,
+    updated.toObject()
+  );
   await logAdminAudit(adminUserId, "SUSPEND_DOCTOR", "Doctor", doctorId, beforeObj, updated.toObject(), reason, requestId);
 
   // Enqueue notification outbox (Correction 7)
@@ -133,6 +180,14 @@ export const suspendDoctor = async (adminUserId, doctorId, reason, requestId = "
 };
 
 export const resetDoctor = async (adminUserId, doctorId, reason, requestId = "") => {
+  const commandKey = requestId ? `RESET_DOCTOR_${doctorId}_${requestId}` : null;
+  if (commandKey) {
+    const existing = await getAdminActionByKey(commandKey);
+    if (existing) {
+      return existing.responseBody;
+    }
+  }
+
   const doctorBefore = await Doctor.findById(doctorId);
   if (!doctorBefore) {
     throw Object.assign(new Error("Doctor profile not found"), { status: 404 });
@@ -151,7 +206,14 @@ export const resetDoctor = async (adminUserId, doctorId, reason, requestId = "")
   }
 
   const correlationId = new mongoose.Types.ObjectId().toString();
-  await logAdminAction(adminUserId, "RESET_DOCTOR", { doctorId }, correlationId);
+  await logAdminAction(
+    adminUserId,
+    "RESET_DOCTOR",
+    { doctorId },
+    correlationId,
+    commandKey,
+    updated.toObject()
+  );
   await logAdminAudit(adminUserId, "RESET_DOCTOR", "Doctor", doctorId, beforeObj, updated.toObject(), reason, requestId);
 
   return updated;

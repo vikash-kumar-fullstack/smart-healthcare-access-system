@@ -94,6 +94,9 @@ const visitSchema = new mongoose.Schema({
 visitSchema.index({ patientId: 1, bookingDate: 1 });
 visitSchema.index({ doctorId: 1, bookingDate: 1 });
 visitSchema.index({ status: 1 });
+visitSchema.index({ patientId: 1, createdAt: 1 });
+visitSchema.index({ doctorId: 1, createdAt: 1 });
+visitSchema.index({ hospitalId: 1, createdAt: 1 });
 
 const Visit = mongoose.model("Visit", visitSchema);
 export default Visit;

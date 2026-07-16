@@ -56,6 +56,7 @@ import AdminAudit from "../src/modules/admin/admin_audit.model.js";
 import AdminAction from "../src/modules/admin/admin_action.model.js";
 import AdminReport from "../src/modules/admin/admin_report.model.js";
 import SystemHealth from "../src/modules/admin/system_health.model.js";
+import SystemHealthRollup from "../src/modules/admin/system_health_rollup.model.js";
 import AdminDashboardCache from "../src/modules/admin/admin_dashboard_cache.model.js";
 import QueueIntervention from "../src/modules/admin/queue_intervention.model.js";
 import AdminSession from "../src/modules/admin/admin_session.model.js";
@@ -126,6 +127,9 @@ const createUser = async ({ name, email, phone, role }) => {
     email,
     phone,
     role,
+    profileCompleted: true,
+    gender: "male",
+    dob: new Date("1995-01-01"),
     password: await bcrypt.hash(password, 10)
   });
   created.users.push(user._id);
@@ -212,6 +216,16 @@ const run = async () => {
   const testMongoUri = rewriteMongoUri(process.env.MONGO_URI);
   console.log("Connecting to isolated test database...");
   await mongoose.connect(testMongoUri);
+
+  console.log("Cleaning test database collections...");
+  await Promise.all(
+    mongoose.modelNames().map(modelName => mongoose.model(modelName).deleteMany({}))
+  );
+
+  console.log("Waiting for mongoose indexes to finish building...");
+  await Promise.all(
+    mongoose.modelNames().map(modelName => mongoose.model(modelName).init())
+  );
 
   // Pre-run cleanup of leftover test users and doctors to avoid duplicate key errors
   const testPhones = [
@@ -2010,7 +2024,7 @@ const run = async () => {
 
   // Increment queue version (simulation of booking event/queue session updates)
   await SearchVersionMeta.updateOne({ key: "global-versions" }, { $inc: { queueVersion: 1 } });
-  
+
   const secondCacheQuery = await expectSuccess("GET", "/api/v1/search?q=fever", { token: patientOneToken });
   const executeEvents = await SearchOutbox.find({ eventType: "SEARCH_EXECUTED" });
   assert.ok(executeEvents.length >= 2);
@@ -2018,7 +2032,7 @@ const run = async () => {
   // 6. Eventually Consistent Analytics CTR (outbox worker updates aggregated counts)
   console.log("  - Test 6: Outbox worker aggregates searches/clicks/bookings ctr asynchronously...");
   const dateIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
-  
+
   const { searchOutboxDispatcher, nightlySearchRollupWorker } = await import("../src/modules/search/search_worker.js");
   await searchOutboxDispatcher();
 
@@ -2046,7 +2060,7 @@ const run = async () => {
   });
 
   await nightlySearchRollupWorker();
-  
+
   const updatedMonitoring = await SearchMonitoringDaily.findOne({ date: dateIST, scope: "global" });
   assert.equal(updatedMonitoring.latencyP50, 60, "P50 latency should be calculated correctly");
   assert.equal(updatedMonitoring.latencyP95, 100, "P95 latency should be calculated correctly");
@@ -2169,7 +2183,7 @@ const run = async () => {
   const { stopSearchWorkers, initSearchWorkers } = await import("../src/modules/search/search_worker.js");
   stopSearchWorkers();
   await SearchOutbox.deleteMany({});
-  
+
   await expectSuccess("GET", "/api/v1/search?q=fever", { token: patientOneToken });
   const pendingOutboxCount = await SearchOutbox.countDocuments({ status: "pending" });
   assert.ok(pendingOutboxCount > 0, "Event should remain pending");
@@ -2188,12 +2202,11 @@ const run = async () => {
 
   // Stop workers to prevent race conditions during manual rollup test
   stopSearchWorkers();
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  await SearchOutbox.deleteMany({});
+  await new Promise((resolve) => setTimeout(resolve, 1000));
 
   // 19. Rollup clears buckets
   console.log("  - Test 19: Rollup clears buckets...");
-  stopSearchWorkers();
-  await SearchOutbox.deleteMany({});
   await SearchMonitoringDaily.deleteOne({ date: dateIST, scope: "global" });
   await SearchMonitoringDaily.create({
     date: dateIST,
@@ -2390,7 +2403,7 @@ const run = async () => {
 
   // Test 6: Visibility Rules (Doctor full access, Patient visibleSummary, Admin metadata only)
   console.log("  - Test 6: Visibility Rules...");
-  
+
   // Set version 2 containsInternalNotes: true, visibility rules for test
   await MedicalRecordVersion.updateOne(
     { recordId: p8Record._id, version: 2 },
@@ -2429,7 +2442,7 @@ const run = async () => {
   // Test 13: Export snapshot freeze verification
   console.log("  - Test 13: Export snapshot freeze validation...");
   const exportBeforeDate = p8ExportRes.generatedAt;
-  
+
   // Wait a small bit and trigger export again
   await new Promise(r => setTimeout(r, 100));
   const p8Export2 = await expectSuccess("GET", `/api/v1/medical-records/${p8Record._id}/export?format=json`, {
@@ -2548,7 +2561,7 @@ const run = async () => {
   // Test 19: Export Audit Trail
   console.log("  - Test 19: Export Audit Trail...");
   const logsCountBefore = await MedicalRecordExportLog.countDocuments({ recordId: p8Record._id });
-  
+
   await expectSuccess("GET", `/api/v1/medical-records/${p8Record._id}/export?format=json`, {
     token: p8DoctorToken
   });
@@ -2624,7 +2637,7 @@ const run = async () => {
     role: "doctor"
   });
   const p9DoctorToken = await login(p9DoctorUser.email);
-  
+
   const p9Doctor = await Doctor.create({
     name: `${testRunId} Dr P9 EMR`,
     specialization: "cardiology",
@@ -2724,6 +2737,8 @@ const run = async () => {
   created.queues.push(p9Booking.booking.queueId);
   const queueEntryId = p9Booking.booking.queueId.toString();
   const queueSessionId = p9Booking.booking.visit.sessionId.toString();
+  const originalQueueDoc = await mongoose.model("Queue").findById(queueEntryId);
+  const originalQueueNumber = originalQueueDoc.queueNumber;
 
   // Pause session
   await expectSuccess("PATCH", `/api/v1/admin/queues/${queueSessionId}/pause`, {
@@ -2808,6 +2823,23 @@ const run = async () => {
   assert.ok(queueIntervention, "Queue intervention log must be populated");
   assert.equal(queueIntervention.type, "reassign_patient");
 
+  // Hardening 3: Queue Intervention Rollback
+  console.log("  - Hardening 3: Queue Intervention Rollback verification...");
+  const revertRes = await expectSuccess("PATCH", `/api/v1/admin/interventions/${queueIntervention._id}/revert`, {
+    token: p9SuperAdminToken
+  });
+  assert.ok(revertRes.revertedAt, "Intervention revertedAt must be populated");
+
+  // Verify patient is moved back to original doctor (p9Doctor) and original queue details are restored
+  const revertedQueue = await mongoose.model("Queue").findById(queueEntryId);
+  assert.equal(revertedQueue.doctorId.toString(), p9Doctor._id.toString(), "Patient should be moved back to the original doctor");
+  assert.equal(revertedQueue.queueNumber, originalQueueNumber, "Patient queueNumber should be reverted back to original");
+
+  // Re-reverting should fail with 400 Bad Request
+  await expectFailure("PATCH", `/api/v1/admin/interventions/${queueIntervention._id}/revert`, 400, {
+    token: p9SuperAdminToken
+  });
+
   // Test 6 & 16: Dashboard Cache & Version Mismatches
   console.log("  - Test 6: Dashboard Cache recycles and Test 16: Cache version mismatch validations...");
   const cacheRefresh = await expectSuccess("POST", "/api/v1/admin/dashboard/refresh", {
@@ -2848,8 +2880,54 @@ const run = async () => {
   assert.ok(completedReport, "Reports worker must compile pending files in background");
   assert.ok(completedReport.payload.doctors.length > 0, "Completed report must contain computed statistical lists");
 
+  // Hardening 1: Command Idempotency
+  console.log("  - Hardening 1: Command Idempotency assertions...");
+  const idempReqId = `req-idemp-${Date.now()}`;
+  const idempHosp = await Hospital.create({
+    name: `${testRunId} Idemp Hosp`,
+    address: "Idemp Address",
+    location: { type: "Point", coordinates: [85.1, 25.6] },
+    specializations: ["cardiology"]
+  });
+  created.hospitals.push(idempHosp._id);
+
+  // Call suspend once with custom x-request-id
+  const suspendRes1 = await fetch(`${baseUrl}/api/v1/admin/hospitals/${idempHosp._id}/suspend`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${p9SuperAdminToken}`,
+      "x-request-id": idempReqId
+    },
+    body: JSON.stringify({ reason: "Testing Idempotency" })
+  });
+  const suspendBody1 = await suspendRes1.json();
+  assert.equal(suspendBody1.success, true, "First suspend call should succeed");
+
+  // Assert exactly 1 audit entry exists
+  const idempAuditsBefore = await AdminAudit.find({ requestId: idempReqId });
+  assert.equal(idempAuditsBefore.length, 1, "There should be exactly one audit trail entry logged initially");
+
+  // Call suspend again with same x-request-id
+  const suspendRes2 = await fetch(`${baseUrl}/api/v1/admin/hospitals/${idempHosp._id}/suspend`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${p9SuperAdminToken}`,
+      "x-request-id": idempReqId
+    },
+    body: JSON.stringify({ reason: "Testing Idempotency" })
+  });
+  const suspendBody2 = await suspendRes2.json();
+  assert.equal(suspendBody2.success, true, "Second suspend call with same x-request-id should succeed");
+  assert.equal(suspendBody2.data._id, suspendBody1.data._id, "Second response should return same hospital data");
+
+  // Verify only one audit entry was logged in total
+  const idempAuditsAfter = await AdminAudit.find({ requestId: idempReqId });
+  assert.equal(idempAuditsAfter.length, 1, "There should still be exactly one audit trail entry logged (idempotency bypassed write)");
+
   // Test 8 & 15: Emergency controls and readonly booking locks
-  console.log("  - Test 8: Emergency toggles and Test 15: Readonly mode booking restrictions...");
+  console.log("  - Test 8: Emergency toggles and Test 15: Readonly mode booking restrictions (with Hardening 2 Route Exemptions)...");
   await expectSuccess("PATCH", "/api/v1/admin/emergency/readonly", {
     token: p9SuperAdminToken,
     body: { active: true, reason: "Lock bookings for readonly test" }
@@ -2861,10 +2939,16 @@ const run = async () => {
     body: { doctorId: p9Doctor._id.toString() }
   });
 
-  // Fetching dashboard must still work (analytics continue)
+  // Fetching dashboard must still work (GET request)
   await expectSuccess("GET", "/api/v1/admin/dashboard", { token: p9SuperAdminToken });
 
-  // Disable readonly
+  // Verify exempt POST (login) operates successfully under readonly
+  const loginExemptData = await expectSuccess("POST", "/api/v1/auth/login", {
+    body: { email: p9Patient.email, password }
+  });
+  assert.ok(loginExemptData.token);
+
+  // Disable readonly (using exempt PATCH route)
   await expectSuccess("PATCH", "/api/v1/admin/emergency/readonly", {
     token: p9SuperAdminToken,
     body: { active: false, reason: "Testing completed" }
@@ -2893,6 +2977,31 @@ const run = async () => {
   assert.ok(telemetryMetrics.dbLatency !== undefined);
   assert.ok(telemetryMetrics.errorRate !== undefined);
 
+  // Hardening 4: Telemetry retention TTL and aggregation rollups
+  console.log("  - Hardening 4: Telemetry aggregation rollups verification...");
+  await SystemHealth.create({
+    dbLatency: 20,
+    searchP95: 150,
+    notificationBacklog: 3,
+    queueBacklog: 6,
+    activeSockets: 8,
+    errorRate: 1.25,
+    cacheHitRate: 90.5
+  });
+
+  stopHealthWorker();
+  const { generateSystemHealthRollups } = await import("../src/modules/admin/system_health_worker.js");
+  await generateSystemHealthRollups();
+
+  const generatedRollups = await SystemHealthRollup.find({});
+  assert.ok(generatedRollups.length > 0, "System health rollups must be generated in the database");
+  const dailyRollup = generatedRollups.find(r => r.period === "daily");
+  assert.ok(dailyRollup, "Daily rollup should be present");
+  const totalLogsCount = await SystemHealth.countDocuments({});
+  assert.equal(dailyRollup.recordsSampled, totalLogsCount, "recordsSampled must match the total raw logs count");
+  assert.ok(dailyRollup.dbLatency >= 0, "dbLatency should be valid");
+  assert.ok(dailyRollup.searchP95 >= 0, "searchP95 should be valid");
+
   // Test 17: Admin session revocation
   console.log("  - Test 17: Session revoke (logout-all forces 401 unauthorized)...");
   await expectSuccess("POST", "/api/v1/admin/logout-all", { token: p9SuperAdminToken });
@@ -2905,6 +3014,7 @@ const run = async () => {
   await AdminAction.deleteMany({});
   await AdminReport.deleteMany({});
   await SystemHealth.deleteMany({});
+  await SystemHealthRollup.deleteMany({});
   await AdminDashboardCache.deleteMany({});
   await AdminSession.deleteMany({});
   await SystemEmergencyState.deleteMany({});

@@ -11,6 +11,7 @@ import {
 } from "./visit.service.js";
 import { successResponse, errorResponse } from "../../utils/apiResponse.js";
 import asyncHandler from "../../utils/asyncHandler.js";
+import { paginate } from "../../utils/pagination.js";
 
 // ── GET PATIENT VISITS (Cursor Paginated) ────────────────────────────────────
 export const getPatientVisits = asyncHandler(async (req, res) => {
@@ -22,6 +23,15 @@ export const getPatientVisits = asyncHandler(async (req, res) => {
   if (req.query.status) query.status = req.query.status;
   if (req.query.doctor) query.doctorId = req.query.doctor;
   if (req.query.date) query.bookingDate = req.query.date;
+
+  if (req.query.page !== undefined) {
+    const populated = [
+      { path: "doctorId", select: "name specialization" },
+      { path: "patientId", select: "name phone email" }
+    ];
+    const result = await paginate(Visit, req.query, query, populated);
+    return successResponse(res, result, "Patient visits retrieved");
+  }
 
   if (cursor) {
     try {
@@ -38,8 +48,11 @@ export const getPatientVisits = asyncHandler(async (req, res) => {
   }
 
   const visits = await Visit.find(query)
+    .populate("doctorId", "name specialization")
     .sort({ createdAt: -1, _id: -1 })
-    .limit(limit + 1);
+    .limit(limit + 1)
+    .maxTimeMS(5000)
+    .lean();
 
   const hasMore = visits.length > limit;
   let nextCursor = null;
@@ -132,11 +145,25 @@ export const getDoctorVisits = asyncHandler(async (req, res) => {
   const limit = parseInt(req.query.limit) || 10;
   const cursor = req.query.cursor;
   
-  const query = { doctorId: req.doctor._id, deletedAt: null };
+  const doctorId = req.doctor?._id || (await Doctor.findOne({ userId: req.user.userId || req.user.id }).maxTimeMS(2000).lean())?._id;
+  if (!doctorId) {
+    return errorResponse(res, "Doctor profile not found", 404);
+  }
+  
+  const query = { doctorId, deletedAt: null };
   
   if (req.query.status) query.status = req.query.status;
   if (req.query.patient) query.patientId = req.query.patient;
   if (req.query.date) query.bookingDate = req.query.date;
+
+  if (req.query.page !== undefined) {
+    const populated = [
+      { path: "doctorId", select: "name specialization" },
+      { path: "patientId", select: "name phone email" }
+    ];
+    const result = await paginate(Visit, req.query, query, populated);
+    return successResponse(res, result, "Doctor visits retrieved");
+  }
 
   if (cursor) {
     try {
@@ -153,8 +180,11 @@ export const getDoctorVisits = asyncHandler(async (req, res) => {
   }
 
   const visits = await Visit.find(query)
+    .populate("patientId", "name phone email")
     .sort({ createdAt: -1, _id: -1 })
-    .limit(limit + 1);
+    .limit(limit + 1)
+    .maxTimeMS(5000)
+    .lean();
 
   const hasMore = visits.length > limit;
   let nextCursor = null;

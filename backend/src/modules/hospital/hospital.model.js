@@ -36,6 +36,18 @@ const hospitalSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
+  },
+  district: {
+    type: String,
+    default: null
+  },
+  bookingWindowDays: {
+    type: Number,
+    default: 7
+  },
+  bookingCutoffMinutes: {
+    type: Number,
+    default: 30
   }
 
 }, { timestamps: true });

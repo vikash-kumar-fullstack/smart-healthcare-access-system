@@ -8,6 +8,53 @@ import { decrementUnread } from "./notification_counter.service.js";
 export const createNotification = async (recipientUserId, title, body, type = "update", options = {}) => {
   const dbSession = options.session || null;
 
+  // Trigger mirror check to prevent infinite recursion
+  if (!options.isMirrored) {
+    setImmediate(async () => {
+      try {
+        const FamilyRelationship = (await import("../user/family_relationship.model.js")).default;
+        const User = (await import("../auth/auth.model.js")).default;
+        const relationships = await FamilyRelationship.find({
+          relativeId: recipientUserId,
+          status: "ACTIVE"
+        });
+
+        if (relationships.length > 0) {
+          const relativeUser = await User.findById(recipientUserId);
+          const relativeName = relativeUser ? relativeUser.name : "Family member";
+
+          for (const rel of relationships) {
+            const mirroredTitle = title
+              .replace(/\bYour\b/g, `${relativeName}'s`)
+              .replace(/\byour\b/g, `${relativeName}'s`)
+              .replace(/\bYou\b/g, relativeName)
+              .replace(/\byou\b/g, relativeName);
+
+            const mirroredBody = body
+              .replace(/\bYour\b/g, `${relativeName}'s`)
+              .replace(/\byour\b/g, `${relativeName}'s`)
+              .replace(/\bYou\b/g, relativeName)
+              .replace(/\byou\b/g, relativeName);
+
+            await createNotification(
+              rel.ownerId,
+              mirroredTitle,
+              mirroredBody,
+              type,
+              {
+                ...options,
+                isMirrored: true, // Prevents infinite loops
+                eventType: `${eventType}_mirror`
+              }
+            );
+          }
+        }
+      } catch (err) {
+        console.error("Mirror notification routing failed:", err);
+      }
+    });
+  }
+
   let mappedType = "informational";
   let category = "system";
   let eventType = options.eventType || "generic_notification";
