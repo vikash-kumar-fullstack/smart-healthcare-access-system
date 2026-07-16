@@ -409,6 +409,7 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
   const normalizedEmail = email.toLowerCase();
   let user = await User.findOne({ email: normalizedEmail });
 
+  // ACCOUNT LINKING: If a local account with the same email exists, link the Google provider to it to prevent duplicate accounts.
   // Apply strict role and signup rules
   if (role === "patient") {
     if (!user) {
