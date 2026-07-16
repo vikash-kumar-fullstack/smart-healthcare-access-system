@@ -26,3 +26,5 @@ scripts/
 # OS files
 .DS_Store
 Thumbs.db
+
+git_knowledge.txt
