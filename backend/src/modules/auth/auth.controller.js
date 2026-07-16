@@ -239,15 +239,21 @@ export const initiateGoogleAuth = (role) => {
     
     // Set a cookie with the state (10 mins expiry)
     const isProd = process.env.NODE_ENV === "production";
-    const cookieData = JSON.stringify({ state: randomState, role });
+    const cookieData = JSON.stringify({ csrf: randomState, role });
 
-    res.setHeader(
-      "Set-Cookie",
-      `oauth_state=${encodeURIComponent(cookieData)}; HttpOnly; Path=/; Max-Age=600; SameSite=${isProd ? "None" : "Lax"}${isProd ? "; Secure" : ""}`
-    );
+    res.cookie("oauth_state", cookieData, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
+      maxAge: 600 * 1000, // 10 minutes
+      path: "/"
+    });
 
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const redirectUri = process.env.GOOGLE_CALLBACK_URL || "http://localhost:5000/api/v1/auth/google/callback";
+
+    // Base64 encode the state payload (csrf + role)
+    const statePayload = Buffer.from(JSON.stringify({ csrf: randomState, role })).toString("base64");
 
     // If client ID is not configured (offline demo mode), simulate immediate callback redirect
     if (!clientId) {
@@ -262,7 +268,7 @@ export const initiateGoogleAuth = (role) => {
       }
 
       return res.redirect(
-        `${redirectUri}?code=${mockEmail}&state=${encodeURIComponent(randomState)}`
+        `${redirectUri}?code=${mockEmail}&state=${encodeURIComponent(statePayload)}`
       );
     }
 
@@ -271,7 +277,7 @@ export const initiateGoogleAuth = (role) => {
       `&client_id=${encodeURIComponent(clientId)}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&scope=${encodeURIComponent("openid email profile")}` +
-      `&state=${encodeURIComponent(randomState)}`;
+      `&state=${encodeURIComponent(statePayload)}`;
 
     res.redirect(googleAuthUrl);
   };
@@ -283,9 +289,20 @@ export const initiateHospitalGoogle = initiateGoogleAuth("hospital");
 
 export const handleGoogleCallback = asyncHandler(async (req, res) => {
   const { code, state } = req.query;
-  
+  const isProd = process.env.NODE_ENV === "production";
+
+  const clearStateCookieAndRedirect = (errorMessage) => {
+    res.clearCookie("oauth_state", {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax",
+      path: "/"
+    });
+    return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent(errorMessage)}`);
+  };
+
   if (!code || !state) {
-    return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=Missing%20authentication%20code%20or%20state`);
+    return clearStateCookieAndRedirect("Missing authentication code or state");
   }
 
   const parseCookies = (cookieHeader) => {
@@ -300,31 +317,40 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
   const cookies = parseCookies(req.headers.cookie);
   const storedStateJson = cookies.oauth_state;
 
-  const isProd = process.env.NODE_ENV === "production";
-
   if (!storedStateJson) {
-    return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=CSRF%20state%20cookie%20missing.`);
+    return clearStateCookieAndRedirect("CSRF state cookie missing.");
   }
 
-  let parsedState = null;
+  let cookieState = null;
   try {
-    parsedState = JSON.parse(storedStateJson);
+    cookieState = JSON.parse(storedStateJson);
   } catch (err) {
-    return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=Invalid%20CSRF%20cookie%20format.`);
+    return clearStateCookieAndRedirect("Invalid CSRF cookie format.");
   }
 
-  const { state: storedState, role } = parsedState;
-
-  // Prepare cookies array
-  const cookiesToSet = [];
-  const clearStateCookie = `oauth_state=; HttpOnly; Path=/; Max-Age=0; SameSite=${isProd ? "None" : "Lax"}${isProd ? "; Secure" : ""}`;
-  cookiesToSet.push(clearStateCookie);
-
-  if (!storedState || storedState !== state) {
-    res.setHeader("Set-Cookie", cookiesToSet);
-    return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=CSRF%20state%20mismatch.%20Potential%20cross-site%20request%20forgery%20attack%20detected.`);
+  let decodedState = null;
+  try {
+    decodedState = JSON.parse(Buffer.from(state, "base64").toString("utf-8"));
+  } catch (err) {
+    return clearStateCookieAndRedirect("Invalid state parameter format.");
   }
 
+  const { csrf: storedCsrf, role: storedRole } = cookieState;
+  const { csrf: incomingCsrf, role: incomingRole } = decodedState;
+
+  if (!storedCsrf || storedCsrf !== incomingCsrf || storedRole !== incomingRole) {
+    return clearStateCookieAndRedirect("CSRF state mismatch. Potential cross-site request forgery attack detected.");
+  }
+
+  // Clear state cookie since it is validated
+  res.clearCookie("oauth_state", {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    path: "/"
+  });
+
+  const role = incomingRole;
   let email = "";
   let name = "";
   let avatar = null;
@@ -371,7 +397,6 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
       avatar = profile.picture || null;
       googleId = profile.sub;
     } catch (err) {
-      res.setHeader("Set-Cookie", cookiesToSet);
       return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent(err.message)}`);
     }
   } else {
@@ -405,13 +430,10 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
     }
   } else if (role === "doctor") {
     if (!user || user.role !== "doctor") {
-      res.setHeader("Set-Cookie", cookiesToSet);
       return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent("Doctor account not found. Please contact your hospital administrator.")}`);
     }
-    const Doctor = mongoose.models.Doctor || mongoose.model("Doctor");
     const doctorRecord = await Doctor.findOne({ userId: user._id });
     if (!doctorRecord) {
-      res.setHeader("Set-Cookie", cookiesToSet);
       return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent("Doctor account not found. Please contact your hospital administrator.")}`);
     }
     const hasGoogle = user.providers.some(p => p.type === "google");
@@ -421,7 +443,6 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
     }
   } else if (role === "hospital") {
     if (!user || user.role !== "hospital_admin") {
-      res.setHeader("Set-Cookie", cookiesToSet);
       return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent("Hospital Admin account not found. Please contact your administrator.")}`);
     }
     const hasGoogle = user.providers.some(p => p.type === "google");
@@ -430,12 +451,10 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
       await user.save();
     }
   } else {
-    res.setHeader("Set-Cookie", cookiesToSet);
     return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent("Invalid login role context.")}`);
   }
 
   if (user.isActive === false || user.accountStatus !== "ACTIVE") {
-    res.setHeader("Set-Cookie", cookiesToSet);
     return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent("Account status is suspended or inactive. Please contact administrator.")}`);
   }
 
@@ -444,20 +463,35 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
     if (Receptionist) {
       const receptionist = await Receptionist.findOne({ userId: user._id });
       if (receptionist && (receptionist.status === "inactive" || receptionist.status === "archived")) {
-        res.setHeader("Set-Cookie", cookiesToSet);
         return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent(`Your receptionist profile status is ${receptionist.status}. Access denied.`)}`);
       }
     }
   }
 
   const { accessToken, refreshToken } = await generateTokens(user, req);
-  const cookieOptions = `HttpOnly; Path=/; SameSite=${isProd ? "None" : "Lax"}${isProd ? "; Secure" : ""}`;
-  
-  cookiesToSet.push(`accessToken=${accessToken}; ${cookieOptions}; Max-Age=${3600 * 24}`);
-  cookiesToSet.push(`refreshToken=${refreshToken}; ${cookieOptions}; Max-Age=${3600 * 24 * 7}`);
-  cookiesToSet.push(`role=${user.role}; Path=/; SameSite=${isProd ? "None" : "Lax"}${isProd ? "; Secure" : ""}; Max-Age=${3600 * 24 * 7}`);
 
-  res.setHeader("Set-Cookie", cookiesToSet);
+  res.cookie("accessToken", accessToken, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    maxAge: 15 * 60 * 1000, // 15 mins
+    path: "/"
+  });
+
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    path: "/"
+  });
+
+  res.cookie("role", user.role, {
+    secure: isProd,
+    sameSite: isProd ? "none" : "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: "/"
+  });
 
   const OAuthAudit = mongoose.models.OAuthAudit;
   if (OAuthAudit) {
