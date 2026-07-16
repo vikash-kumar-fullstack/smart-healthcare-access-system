@@ -12,6 +12,7 @@ export default function OAuthSuccess() {
     const fetchUserAndRedirect = async () => {
       const t = toast.loading("Finalizing your sign in...");
       try {
+        // Retrieve profile details from backend HttpOnly session cookies
         const res = await api.get("/auth/me");
         const user = res.data.data;
         const { role, profileCompleted } = user;
