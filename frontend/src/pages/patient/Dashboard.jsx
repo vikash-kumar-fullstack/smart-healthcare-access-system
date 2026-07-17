@@ -44,6 +44,7 @@ export default function PatientDashboard() {
     completedVisits: 0,
     unreadAlerts: 0
   });
+  const [healthProfile, setHealthProfile] = useState(null);
 
   const [searchSymptom, setSearchSymptom] = useState(() => localStorage.getItem("symptom_filter") || "");
   const [searchLocation, setSearchLocation] = useState("");
@@ -120,11 +121,12 @@ export default function PatientDashboard() {
         }
       }
 
-      const [queueRes, hospitalsRes, visitsRes, notificationsRes] = await Promise.all([
+      const [queueRes, hospitalsRes, visitsRes, notificationsRes, portalRes] = await Promise.all([
         api.get("/queue/my").catch(() => null),
         api.get("/hospitals").catch(() => ({ data: { data: [] } })),
         api.get("/visits").catch(() => ({ data: { data: [] } })),
-        api.get("/notifications").catch(() => ({ data: { data: [] } }))
+        api.get("/notifications").catch(() => ({ data: { data: [] } })),
+        api.get("/medical-records/portal/summary").catch(() => null)
       ]);
 
       if (queueRes?.data?.success && queueRes.data.data) {
@@ -164,6 +166,12 @@ export default function PatientDashboard() {
         completedVisits: visitsArray.filter(v => v.status === "completed").length,
         unreadAlerts: notificationsArray.filter(n => n.status !== "read" && !n.isRead).length
       });
+
+      if (portalRes?.data?.success && portalRes.data.data?.profile) {
+        setHealthProfile(portalRes.data.data.profile);
+      } else {
+        setHealthProfile(null);
+      }
 
       recordEvent("patient_dashboard_loaded");
     } catch (err) {
@@ -354,6 +362,30 @@ export default function PatientDashboard() {
   };
 
   const activeJourneyStep = getActiveJourneyStep();
+
+  const getBmiDetails = () => {
+    if (!healthProfile?.height || !healthProfile?.weight) {
+      return { val: "N/A", status: "Incomplete Profile", colorClass: "text-slate-400" };
+    }
+    const hM = healthProfile.height / 100;
+    const val = (healthProfile.weight / (hM * hM)).toFixed(1);
+    const num = parseFloat(val);
+    let status = "Healthy (Normal)";
+    let colorClass = "text-emerald-600";
+    if (num < 18.5) {
+      status = "Underweight";
+      colorClass = "text-amber-500";
+    } else if (num >= 25 && num < 30) {
+      status = "Overweight";
+      colorClass = "text-amber-500";
+    } else if (num >= 30) {
+      status = "Obese";
+      colorClass = "text-rose-600";
+    }
+    return { val, status, colorClass };
+  };
+
+  const bmiDetails = getBmiDetails();
 
   // Categorize and sort notifications for the Priority Notification Center
   const getPriorityAlerts = () => {
@@ -822,12 +854,32 @@ export default function PatientDashboard() {
               <div className="grid grid-cols-1 gap-4 text-sm">
                 <div className="flex justify-between items-center bg-linear-to-r from-slate-50 to-white hover:from-cyan-50/20 hover:to-white p-4 rounded-xl border border-slate-100 hover:border-cyan-100/50 transition-all duration-300 shadow-2xs">
                   <span className="text-slate-500 font-bold flex items-center gap-2">
-                    <Activity className="h-4.5 w-4.5 text-[#0F4C81]" />
-                    Blood Pressure
+                    <Heart className="h-4.5 w-4.5 text-rose-500" />
+                    Blood Group
                   </span>
                   <div className="text-right">
-                    <span className="font-extrabold text-slate-700 block">120/80 mmHg</span>
-                    <span className="text-[10px] text-emerald-600 font-bold block">Stable Range</span>
+                    <span className="font-extrabold text-slate-700 block">{healthProfile?.bloodGroup || "N/A"}</span>
+                    <span className="text-[10px] text-emerald-600 font-bold block">Stable / Confirmed</span>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center bg-linear-to-r from-slate-50 to-white hover:from-cyan-50/20 hover:to-white p-4 rounded-xl border border-slate-100 hover:border-cyan-100/50 transition-all duration-300 shadow-2xs">
+                  <span className="text-slate-500 font-bold flex items-center gap-2">
+                    <Activity className="h-4.5 w-4.5 text-[#0F4C81]" />
+                    Recorded Height
+                  </span>
+                  <div className="text-right">
+                    <span className="font-extrabold text-slate-700 block">{healthProfile?.height ? `${healthProfile.height} cm` : "N/A"}</span>
+                    <span className="text-[10px] text-slate-400 font-bold block">Recorded Profile</span>
+                  </div>
+                </div>
+                <div className="flex justify-between items-center bg-linear-to-r from-slate-50 to-white hover:from-cyan-50/20 hover:to-white p-4 rounded-xl border border-slate-100 hover:border-cyan-100/50 transition-all duration-300 shadow-2xs">
+                  <span className="text-slate-500 font-bold flex items-center gap-2">
+                    <Activity className="h-4.5 w-4.5 text-[#0F4C81]" />
+                    Last Weight
+                  </span>
+                  <div className="text-right">
+                    <span className="font-extrabold text-slate-700 block">{healthProfile?.weight ? `${healthProfile.weight} Kg` : "N/A"}</span>
+                    <span className="text-[10px] text-slate-400 font-bold block">Recorded Profile</span>
                   </div>
                 </div>
                 <div className="flex justify-between items-center bg-linear-to-r from-slate-50 to-white hover:from-cyan-50/20 hover:to-white p-4 rounded-xl border border-slate-100 hover:border-cyan-100/50 transition-all duration-300 shadow-2xs">
@@ -836,18 +888,8 @@ export default function PatientDashboard() {
                     Body Mass Index
                   </span>
                   <div className="text-right">
-                    <span className="font-extrabold text-[#0E7490] block">22.4</span>
-                    <span className="text-[10px] text-emerald-600 font-bold block">Healthy (Normal)</span>
-                  </div>
-                </div>
-                <div className="flex justify-between items-center bg-linear-to-r from-slate-50 to-white hover:from-cyan-50/20 hover:to-white p-4 rounded-xl border border-slate-100 hover:border-cyan-100/50 transition-all duration-300 shadow-2xs">
-                  <span className="text-slate-500 font-bold flex items-center gap-2">
-                    <Heart className="h-4.5 w-4.5 text-rose-500" />
-                    Last Weight
-                  </span>
-                  <div className="text-right">
-                    <span className="font-extrabold text-slate-700 block">68 Kg</span>
-                    <span className="text-[10px] text-slate-450 font-bold block">No change</span>
+                    <span className="font-extrabold text-[#0E7490] block">{bmiDetails.val}</span>
+                    <span className={`text-[10px] font-bold block ${bmiDetails.colorClass}`}>{bmiDetails.status}</span>
                   </div>
                 </div>
               </div>
