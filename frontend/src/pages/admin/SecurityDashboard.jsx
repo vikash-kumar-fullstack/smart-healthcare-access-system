@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import toast from "react-hot-toast";
 import { 
   Shield, 
@@ -14,28 +15,32 @@ import {
 } from "lucide-react";
 
 export default function SecurityDashboard() {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const cachedSecurity = getCachedData("admin_security_stats");
+
+  const [data, setData] = useState(cachedSecurity || null);
+  const [loading, setLoading] = useState(!cachedSecurity);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchSecurityStats = async () => {
+  const fetchSecurityStats = async (silent = false) => {
     try {
+      if (!silent && !data && !cachedSecurity) setLoading(true);
       const res = await api.get("/admin/security/stats");
       if (res.data.success) {
         setData(res.data.data);
+        setCachedData("admin_security_stats", res.data.data);
       }
     } catch (err) {
       console.error("Failed to load security statistics:", err);
       toast.error("Failed to load security telemetry.");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   const handleManualRefresh = async () => {
     try {
       setRefreshing(true);
-      await fetchSecurityStats();
+      await fetchSecurityStats(true);
       toast.success("Security telemetry refreshed!");
     } finally {
       setRefreshing(false);
@@ -43,8 +48,8 @@ export default function SecurityDashboard() {
   };
 
   useEffect(() => {
-    fetchSecurityStats();
-    const interval = setInterval(fetchSecurityStats, 10000);
+    fetchSecurityStats(!!data);
+    const interval = setInterval(() => fetchSecurityStats(true), 10000);
     return () => clearInterval(interval);
   }, []);
 

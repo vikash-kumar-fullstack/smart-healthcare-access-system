@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import { 
   Settings, 
   Radio, 
@@ -10,21 +11,29 @@ import {
 } from "lucide-react";
 
 export default function Health() {
-  const [telemetry, setTelemetry] = useState(null);
-  const [emergency, setEmergency] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const cachedHealth = getCachedData("admin_health_telemetry");
+
+  const [telemetry, setTelemetry] = useState(cachedHealth?.telemetry || null);
+  const [emergency, setEmergency] = useState(cachedHealth?.emergency || null);
+  const [loading, setLoading] = useState(!cachedHealth);
   const [updating, setUpdating] = useState(false);
 
-  const fetchHealthData = async () => {
+  const fetchHealthData = async (silent = false) => {
     try {
-      const healthRes = await api.get("/admin/health");
-      const emergencyRes = await api.get("/admin/emergency");
-      setTelemetry(healthRes.data.data);
-      setEmergency(emergencyRes.data.data);
+      if (!silent && !telemetry && !cachedHealth) setLoading(true);
+      const [healthRes, emergencyRes] = await Promise.all([
+        api.get("/admin/health").catch(() => null),
+        api.get("/admin/emergency").catch(() => null)
+      ]);
+      const tel = healthRes?.data?.data || null;
+      const em = emergencyRes?.data?.data || null;
+      if (tel) setTelemetry(tel);
+      if (em) setEmergency(em);
+      setCachedData("admin_health_telemetry", { telemetry: tel, emergency: em });
     } catch (err) {
       console.error("Failed to load telemetry health records:", err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -49,8 +58,8 @@ export default function Health() {
   };
 
   useEffect(() => {
-    fetchHealthData();
-    const interval = setInterval(fetchHealthData, 5000);
+    fetchHealthData(!!telemetry);
+    const interval = setInterval(() => fetchHealthData(true), 5000);
     return () => clearInterval(interval);
   }, []);
 

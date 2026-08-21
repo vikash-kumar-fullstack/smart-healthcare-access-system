@@ -2,6 +2,26 @@ import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import ProtectedRoute from "./ProtectedRoute";
 
+// Eagerly imported Layouts and Patient pages for zero-latency instant navigation
+import PublicLayout from "../layouts/PublicLayout";
+import PatientLayout from "../layouts/PatientLayout";
+import DoctorLayout from "../layouts/DoctorLayout";
+import AdminLayout from "../layouts/AdminLayout";
+import ReceptionistLayout from "../layouts/ReceptionistLayout";
+
+import PatientDashboard from "../pages/patient/Dashboard";
+import PatientSearch from "../pages/patient/Search";
+import Queue from "../pages/patient/Queue";
+import History from "../pages/patient/History";
+import Notifications from "../pages/patient/Notifications";
+import Appointments from "../pages/patient/Appointments";
+import Saved from "../pages/patient/Saved";
+import Profile from "../pages/patient/Profile";
+import Settings from "../pages/patient/Settings";
+import FamilyDashboard from "../modules/family/pages/FamilyDashboard";
+import PatientVitals from "../pages/patient/Vitals";
+import PatientEmergency from "../pages/patient/Emergency";
+
 const Login = lazy(() => import("../pages/Login"));
 const Signup = lazy(() => import("../pages/Signup"));
 const Landing = lazy(() => import("../pages/Landing"));
@@ -16,39 +36,30 @@ const RealtimeProvider = lazy(() =>
     default: module.RealtimeProvider
   }))
 );
-const PublicLayout = lazy(() => import("../layouts/PublicLayout"));
-const PatientLayout = lazy(() => import("../layouts/PatientLayout"));
-const PatientDashboard = lazy(() => import("../pages/patient/Dashboard"));
-const PatientSearch = lazy(() => import("../pages/patient/Search"));
-const Queue = lazy(() => import("../pages/patient/Queue"));
-const History = lazy(() => import("../pages/patient/History"));
-const Notifications = lazy(() => import("../pages/patient/Notifications"));
-const Appointments = lazy(() => import("../pages/patient/Appointments"));
-const Saved = lazy(() => import("../pages/patient/Saved"));
-const Profile = lazy(() => import("../pages/patient/Profile"));
-const Settings = lazy(() => import("../pages/patient/Settings"));
+
+import DoctorDashboard from "../pages/doctor/Dashboard";
+import Analytics from "../pages/doctor/Analytics";
+import MedicalRecords from "../pages/MedicalRecords";
+import RecordDetails from "../pages/RecordDetails";
+import MedicalTimeline from "../pages/MedicalTimeline";
+
+import AdminDashboard from "../pages/admin/Dashboard";
+import SecurityDashboard from "../pages/admin/SecurityDashboard";
+import AdminHospitals from "../pages/admin/Hospitals";
+import AdminDoctors from "../pages/admin/Doctors";
+import AdminQueues from "../pages/admin/Queues";
+import AdminReports from "../pages/admin/Reports";
+import AdminHealth from "../pages/admin/Health";
+import AdminAudits from "../pages/admin/AuditLogs";
+import HospitalOverview from "../pages/admin/HospitalOverview";
+import Receptionists from "../pages/admin/Receptionists";
+import Reception from "../pages/admin/Reception";
+import AdminSchedules from "../pages/admin/Schedules";
+import Applications from "../pages/admin/Applications";
+import HospitalDoctors from "../pages/admin/HospitalDoctors";
+
 const BookingJourney = lazy(() => import("../pages/patient/BookingJourney"));
 const BookingSuccess = lazy(() => import("../pages/patient/BookingSuccess"));
-const DoctorLayout = lazy(() => import("../layouts/DoctorLayout"));
-const DoctorDashboard = lazy(() => import("../pages/doctor/Dashboard"));
-const Analytics = lazy(() => import("../pages/doctor/Analytics"));
-const MedicalRecords = lazy(() => import("../pages/MedicalRecords"));
-const RecordDetails = lazy(() => import("../pages/RecordDetails"));
-const MedicalTimeline = lazy(() => import("../pages/MedicalTimeline"));
-const AdminLayout = lazy(() => import("../layouts/AdminLayout"));
-const AdminDashboard = lazy(() => import("../pages/admin/Dashboard"));
-const SecurityDashboard = lazy(() => import("../pages/admin/SecurityDashboard"));
-const AdminHospitals = lazy(() => import("../pages/admin/Hospitals"));
-const AdminDoctors = lazy(() => import("../pages/admin/Doctors"));
-const AdminQueues = lazy(() => import("../pages/admin/Queues"));
-const AdminReports = lazy(() => import("../pages/admin/Reports"));
-const AdminHealth = lazy(() => import("../pages/admin/Health"));
-const AdminAudits = lazy(() => import("../pages/admin/AuditLogs"));
-const HospitalOverview = lazy(() => import("../pages/admin/HospitalOverview"));
-const Receptionists = lazy(() => import("../pages/admin/Receptionists"));
-const Reception = lazy(() => import("../pages/admin/Reception"));
-const ReceptionistLayout = lazy(() => import("../layouts/ReceptionistLayout"));
-const AdminSchedules = lazy(() => import("../pages/admin/Schedules"));
 
 const RouteFallback = () => (
   <div className="min-h-screen bg-[var(--color-light)] p-6">
@@ -113,6 +124,9 @@ export default function AppRoutes() {
             <Route path="settings" element={<Settings />} />
             <Route path="book" element={<BookingJourney />} />
             <Route path="booking-success" element={<BookingSuccess />} />
+            <Route path="family" element={<FamilyDashboard />} />
+            <Route path="vitals" element={<PatientVitals />} />
+            <Route path="emergency" element={<PatientEmergency />} />
             <Route path="medical-records" element={<MedicalRecords />} />
             <Route path="medical-records/:id" element={<RecordDetails />} />
             <Route path="timeline" element={<MedicalTimeline />} />
@@ -151,6 +165,7 @@ export default function AppRoutes() {
             <Route index element={<AdminDashboard />} />
             <Route path="security" element={<SecurityDashboard />} />
             <Route path="hospitals" element={<AdminHospitals />} />
+            <Route path="hospitals/:id" element={<HospitalDoctors />} />
             <Route path="doctors" element={<AdminDoctors />} />
             <Route path="queues" element={<AdminQueues />} />
             <Route path="reports" element={<AdminReports />} />
@@ -160,7 +175,7 @@ export default function AppRoutes() {
             <Route path="receptionists" element={<Receptionists />} />
             <Route path="schedules" element={<AdminSchedules />} />
             <Route path="analytics" element={<HospitalOverview />} />
-            <Route path="applications" element={<AdminDoctors />} />
+            <Route path="applications" element={<Applications />} />
             <Route path="profile" element={<Profile />} />
             <Route path="settings" element={<Settings />} />
             <Route path="notifications" element={<Notifications />} />

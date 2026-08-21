@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import { 
   FileSpreadsheet, 
   Plus, 
@@ -8,24 +9,28 @@ import {
 } from "lucide-react";
 
 export default function Reports() {
-  const [reports, setReports] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedReports = getCachedData("admin_reports_history");
+
+  const [reports, setReports] = useState(cachedReports || []);
+  const [loading, setLoading] = useState(!cachedReports);
   const [error, setError] = useState("");
   const [reportType, setReportType] = useState("doctor_performance");
   const [requesting, setRequesting] = useState(false);
   const [viewingPayload, setViewingPayload] = useState(null);
 
-  const fetchReports = async () => {
+  const fetchReports = async (silent = false) => {
     try {
+      if (!silent && !reports.length && !cachedReports) setLoading(true);
       const res = await api.get("/admin/reports");
       if (res.data.success) {
         const list = Array.isArray(res.data.data) ? res.data.data : (res.data.data?.data || []);
         setReports(list);
+        setCachedData("admin_reports_history", list);
       }
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load reports history");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -36,7 +41,7 @@ export default function Reports() {
       const res = await api.post("/admin/reports", { reportType });
       if (res.data.success) {
         alert("Report request submitted! It will generate in the background in a few seconds.");
-        fetchReports();
+        fetchReports(true);
       }
     } catch (err) {
       alert(err.response?.data?.message || "Failed to request report");
@@ -57,9 +62,9 @@ export default function Reports() {
   };
 
   useEffect(() => {
-    fetchReports();
-    // Poll every 5 seconds to update processing status in real time
-    const interval = setInterval(fetchReports, 5000);
+    fetchReports(reports.length > 0);
+    // Poll silently every 5 seconds to update processing status in real time
+    const interval = setInterval(() => fetchReports(true), 5000);
     return () => clearInterval(interval);
   }, []);
 

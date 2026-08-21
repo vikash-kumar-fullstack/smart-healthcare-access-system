@@ -1,16 +1,20 @@
 import { useState, useEffect } from "react";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import toast from "react-hot-toast";
 import { Hospital, Users, BarChart3, Activity, Clock, ShieldAlert, CheckCircle2 } from "lucide-react";
 
 export default function HospitalOverview() {
-  const [hospitals, setHospitals] = useState([]);
-  const [selectedHospitalId, setSelectedHospitalId] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [queues, setQueues] = useState([]);
+  const cachedOverview = getCachedData("admin_hospital_overview_data");
 
-  const fetchHospitals = async () => {
+  const [hospitals, setHospitals] = useState(cachedOverview?.hospitals || []);
+  const [selectedHospitalId, setSelectedHospitalId] = useState(cachedOverview?.selectedHospitalId || "");
+  const [loading, setLoading] = useState(!cachedOverview);
+  const [queues, setQueues] = useState(cachedOverview?.queues || []);
+
+  const fetchHospitals = async (silent = false) => {
     try {
+      if (!silent && !cachedOverview) setLoading(true);
       const res = await api.get("/hospitals");
       if (res.data.success) {
         let list = res.data.data.data || res.data.data || [];
@@ -26,9 +30,10 @@ export default function HospitalOverview() {
         }
         
         setHospitals(list);
-        if (list.length > 0) {
+        if (list.length > 0 && !selectedHospitalId) {
           setSelectedHospitalId(list[0]._id);
         }
+        setCachedData("admin_hospital_overview_data", { hospitals: list, selectedHospitalId, queues });
       }
     } catch (err) {
       toast.error("Failed to load hospitals list.");

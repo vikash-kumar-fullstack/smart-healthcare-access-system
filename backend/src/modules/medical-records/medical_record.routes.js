@@ -26,7 +26,9 @@ import {
   listFamilyLinks,
   getVisitSummaryPdf,
   postConsentGrant,
-  postConsentRevoke
+  postConsentRevoke,
+  updatePortalVitals,
+  dispatchEmergencySos
 } from "./patient_care.controller.js";
 
 import authMiddleware from "../../middlewares/auth.middleware.js";
@@ -47,6 +49,8 @@ router.post("/workspace/visit/:id/finalize", authMiddleware, authorizeRoles("doc
 
 // ── New Patient Portal Endpoints ─────────────────────────────────────────────
 router.get("/portal/summary", authMiddleware, getPortalSummary);
+router.put("/portal/vitals", authMiddleware, updatePortalVitals);
+router.post("/portal/emergency-sos", authMiddleware, dispatchEmergencySos);
 router.post("/portal/family", authMiddleware, createFamilyLink);
 router.get("/portal/family", authMiddleware, listFamilyLinks);
 router.get("/portal/visit/:id/summary", authMiddleware, getVisitSummaryPdf);

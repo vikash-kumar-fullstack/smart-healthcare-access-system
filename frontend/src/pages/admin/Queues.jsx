@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import { 
   GitCommit, 
   Pause, 
@@ -12,8 +13,10 @@ import { useRealtime } from "../../components/RealtimeProvider";
 
 export default function Queues() {
   const { subscribe } = useRealtime() || {};
-  const [sessions, setSessions] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedQueues = getCachedData("admin_queues_list");
+
+  const [sessions, setSessions] = useState(cachedQueues || []);
+  const [loading, setLoading] = useState(!cachedQueues);
   const [error, setError] = useState("");
 
   // Reassignment Form State
@@ -22,12 +25,13 @@ export default function Queues() {
   const [reassignReason, setReassignReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const fetchSessions = async () => {
+  const fetchSessions = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent && !cachedQueues) setLoading(true);
       const res = await api.get("/admin/queues");
       if (res.data.success) {
         setSessions(res.data.data);
+        setCachedData("admin_queues_list", res.data.data);
       }
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load queue sessions");

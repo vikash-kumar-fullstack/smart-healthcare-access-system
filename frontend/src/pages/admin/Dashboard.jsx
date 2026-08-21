@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import { 
   Users, 
   Building, 
@@ -13,17 +14,20 @@ import { useRealtime } from "../../components/RealtimeProvider";
 
 export default function Dashboard() {
   const { subscribe } = useRealtime() || {};
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const cachedAdminDash = getCachedData("admin_dashboard_summary");
+
+  const [data, setData] = useState(cachedAdminDash || null);
+  const [loading, setLoading] = useState(!cachedAdminDash);
   const [error, setError] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent && !cachedAdminDash) setLoading(true);
       const res = await api.get("/admin/dashboard");
       if (res.data.success) {
         setData(res.data.data);
+        setCachedData("admin_dashboard_summary", res.data.data);
       } else {
         setError(res.data.message || "Failed to load dashboard statistics");
       }

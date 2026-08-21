@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import toast from "react-hot-toast";
 
 // ─── Session state config ────────────────────────────────────────────────────
@@ -56,12 +57,15 @@ const StatusBadge = ({ status }) => {
 };
 
 export default function DoctorDashboard() {
-  const [profile, setProfile] = useState(null);
-  const [profileLoading, setProfileLoading] = useState(true);
+  const cachedDocProfile = getCachedData("doctor_profile");
+  const cachedQueueData = getCachedData("doctor_queue_data");
+
+  const [profile, setProfile] = useState(cachedDocProfile || null);
+  const [profileLoading, setProfileLoading] = useState(!cachedDocProfile);
   const [profileError, setProfileError] = useState("");
 
-  const [sessionStatus, setSessionStatus] = useState("inactive");
-  const [stats, setStats] = useState({
+  const [sessionStatus, setSessionStatus] = useState(cachedQueueData?.sessionStatus || "inactive");
+  const [stats, setStats] = useState(cachedQueueData?.stats || {
     waiting: 0,
     completed: 0,
     skipped: 0,
@@ -70,10 +74,10 @@ export default function DoctorDashboard() {
     avgConsultationTime: 5,
     completionRate: 100
   });
-  const [currentPatient, setCurrentPatient] = useState(null);
-  const [upcomingPatients, setUpcomingPatients] = useState([]);
-  const [historyPatients, setHistoryPatients] = useState([]);
-  const [queueLoading, setQueueLoading] = useState(true);
+  const [currentPatient, setCurrentPatient] = useState(cachedQueueData?.currentPatient || null);
+  const [upcomingPatients, setUpcomingPatients] = useState(cachedQueueData?.upcomingPatients || []);
+  const [historyPatients, setHistoryPatients] = useState(cachedQueueData?.history || []);
+  const [queueLoading, setQueueLoading] = useState(!cachedQueueData);
   const [actionLoading, setActionLoading] = useState(false);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -125,10 +129,11 @@ export default function DoctorDashboard() {
   // ── Fetch doctor profile ────────────────────────────────────────────────────
   const fetchProfile = async (silent = false) => {
     try {
-      if (!silent) setProfileLoading(true);
+      if (!profile && !silent) setProfileLoading(true);
       const res = await api.get("/doctors/profile");
       const doc = res.data.data.doctor;
       setProfile(doc);
+      setCachedData("doctor_profile", doc);
       setProfileError("");
       if (doc) {
         setForm({
@@ -165,7 +170,7 @@ export default function DoctorDashboard() {
       console.error(err);
       setProfileError(err.response?.data?.message || "Doctor profile not found.");
     } finally {
-      if (!silent) setProfileLoading(false);
+      setProfileLoading(false);
     }
   };
 
@@ -239,6 +244,7 @@ export default function DoctorDashboard() {
     try {
       const res = await api.get("/queue/doctor");
       const data = res.data.data;
+      setCachedData("doctor_queue_data", data);
       setSessionStatus(data.sessionState || "inactive");
       setStats(data.stats || {
         waiting: 0,
@@ -262,16 +268,12 @@ export default function DoctorDashboard() {
   };
 
   useEffect(() => {
+    // Run profile and queue fetches concurrently on mount for instant dashboard rendering
     fetchProfile();
+    fetchQueue();
+    const interval = setInterval(fetchQueue, 15000);
+    return () => clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-    if (profile && profile.profileCompleted && ["active", "verified", "approved"].includes(profile.status)) {
-      fetchQueue();
-      const interval = setInterval(fetchQueue, 15000);
-      return () => clearInterval(interval);
-    }
-  }, [profile]);
 
   // ── Session Duration Ticker (Pause-Aware) ──────────────────────────────────
   useEffect(() => {
@@ -799,39 +801,39 @@ export default function DoctorDashboard() {
       {/* ── Analytics Preview ─────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         {/* Session Duration */}
-        <div className="bg-gradient-to-br from-indigo-500 to-blue-600 rounded-2xl p-5 text-white shadow-sm flex items-center justify-between hover-card-trigger">
+        <div className="bg-gradient-to-br from-[#0F4C81] via-[#0E7490] to-[#14B8A6] rounded-2xl p-5 text-white shadow-sm flex items-center justify-between hover-card-trigger border border-cyan-900/20">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-widest text-indigo-100">Session Duration</div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-cyan-200/90">Session Duration</div>
             <div className="text-2xl font-black mt-1.5">{sessionDuration}</div>
           </div>
-          <span className="text-2xl bg-white/20 p-2.5 rounded-xl border border-white/10">⏱️</span>
+          <span className="text-2xl bg-white/15 p-2.5 rounded-xl border border-white/20 shadow-xs">⏱️</span>
         </div>
 
         {/* Patients Seen Today */}
-        <div className="bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl p-5 text-white shadow-sm flex items-center justify-between hover-card-trigger">
+        <div className="bg-gradient-to-br from-[#0F4C81] via-[#0E7490] to-[#14B8A6] rounded-2xl p-5 text-white shadow-sm flex items-center justify-between hover-card-trigger border border-cyan-900/20">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-widest text-emerald-100">Patients Seen Today</div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-cyan-200/90">Patients Seen Today</div>
             <div className="text-2xl font-black mt-1.5">{stats.completed}</div>
           </div>
-          <span className="text-2xl bg-white/20 p-2.5 rounded-xl border border-white/10">👥</span>
+          <span className="text-2xl bg-white/15 p-2.5 rounded-xl border border-white/20 shadow-xs">👥</span>
         </div>
 
         {/* Avg Consultation Time */}
-        <div className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl p-5 text-white shadow-sm flex items-center justify-between hover-card-trigger">
+        <div className="bg-gradient-to-br from-[#0F4C81] via-[#0E7490] to-[#14B8A6] rounded-2xl p-5 text-white shadow-sm flex items-center justify-between hover-card-trigger border border-cyan-900/20">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-widest text-amber-100">Avg Consultation</div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-cyan-200/90">Avg Consultation</div>
             <div className="text-2xl font-black mt-1.5">{stats.avgConsultationTime} mins</div>
           </div>
-          <span className="text-2xl bg-white/20 p-2.5 rounded-xl border border-white/10">📅</span>
+          <span className="text-2xl bg-white/15 p-2.5 rounded-xl border border-white/20 shadow-xs">📅</span>
         </div>
 
         {/* Completion Rate */}
-        <div className="bg-gradient-to-br from-rose-500 to-pink-600 rounded-2xl p-5 text-white shadow-sm flex items-center justify-between hover-card-trigger">
+        <div className="bg-gradient-to-br from-[#0F4C81] via-[#0E7490] to-[#14B8A6] rounded-2xl p-5 text-white shadow-sm flex items-center justify-between hover-card-trigger border border-cyan-900/20">
           <div>
-            <div className="text-[10px] font-black uppercase tracking-widest text-rose-100">Completion Rate</div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-cyan-200/90">Completion Rate</div>
             <div className="text-2xl font-black mt-1.5">{stats.completionRate}%</div>
           </div>
-          <span className="text-2xl bg-white/20 p-2.5 rounded-xl border border-white/10">📈</span>
+          <span className="text-2xl bg-white/15 p-2.5 rounded-xl border border-white/20 shadow-xs">📈</span>
         </div>
       </div>
 
@@ -1051,237 +1053,7 @@ export default function DoctorDashboard() {
         )}
       </div>
 
-      {/* ── Settings & Schedules Panel ────────────────────────────────────────── */}
-      <div className="bg-white rounded-[24px] shadow-sm border border-slate-200/60 p-6 hover-card-trigger space-y-6">
-        <div className="border-b border-slate-100 pb-4">
-          <h2 className="text-xl font-extrabold text-slate-800 tracking-tight">⚙️ Doctor & Queue Settings</h2>
-          <p className="text-slate-400 font-bold text-xs mt-1">Configure your live status, shift schedules, overrides, and capacity limits.</p>
-        </div>
 
-        <form onSubmit={handleSaveSettings} className="space-y-6">
-          
-          {/* Live operational settings */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-xs font-bold text-slate-550 uppercase tracking-wider mb-2">Live Availability State</label>
-              <select
-                className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-blue-500 focus:outline-none bg-white font-bold text-slate-700"
-                value={settingsForm.availabilityState}
-                onChange={(e) => setSettingsForm(prev => ({ ...prev, availabilityState: e.target.value }))}
-              >
-                <option value="available">🟢 Available (Accepting bookings)</option>
-                <option value="break">⏸️ On Break (Temporary notice shown)</option>
-                <option value="unavailable">🔴 Unavailable (Offline / Out of office)</option>
-              </select>
-            </div>
-
-            {settingsForm.availabilityState === "unavailable" && (
-              <div>
-                <label className="block text-xs font-bold text-slate-550 uppercase tracking-wider mb-2">Unavailable Session Policy</label>
-                <select
-                  className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-blue-500 focus:outline-none bg-white font-bold text-slate-700"
-                  value={settingsForm.sessionPolicy}
-                  onChange={(e) => setSettingsForm(prev => ({ ...prev, sessionPolicy: e.target.value }))}
-                >
-                  <option value="continue">Keep current session active (continue treating current queue)</option>
-                  <option value="stop_bookings">Stop new bookings only (mark session as closing)</option>
-                  <option value="close_session">Close today's session immediately (cancels waiting patients)</option>
-                </select>
-              </div>
-            )}
-          </div>
-
-          {/* Temporary notice inputs */}
-          {settingsForm.availabilityState === "break" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 bg-amber-500/5 rounded-2xl border border-amber-500/10">
-              <div>
-                <label className="block text-xs font-bold text-amber-800 uppercase tracking-wider mb-2">Temporary Notice Message</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Away for lunch, back in 20 mins"
-                  className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-blue-500 focus:outline-none bg-white font-bold text-slate-700"
-                  value={settingsForm.temporaryNoticeMessage}
-                  onChange={(e) => setSettingsForm(prev => ({ ...prev, temporaryNoticeMessage: e.target.value }))}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-amber-800 uppercase tracking-wider mb-2">Expected Return Time</label>
-                <input
-                  type="datetime-local"
-                  className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-blue-500 focus:outline-none bg-white font-bold text-slate-700"
-                  value={settingsForm.temporaryNoticeExpectedUntil}
-                  onChange={(e) => setSettingsForm(prev => ({ ...prev, temporaryNoticeExpectedUntil: e.target.value }))}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Capacities */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-xs font-bold text-slate-550 uppercase tracking-wider mb-2">Default Queue Capacity Limit</label>
-              <input
-                type="number"
-                min="1"
-                max="200"
-                className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-blue-500 focus:outline-none font-bold text-slate-700"
-                value={settingsForm.defaultQueueLimit}
-                onChange={(e) => setSettingsForm(prev => ({ ...prev, defaultQueueLimit: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-550 uppercase tracking-wider mb-2">Average Consultation Time (Minutes)</label>
-              <input
-                type="number"
-                min="1"
-                max="90"
-                className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:border-blue-500 focus:outline-none font-bold text-slate-700"
-                value={settingsForm.avgConsultationTime}
-                onChange={(e) => setSettingsForm(prev => ({ ...prev, avgConsultationTime: e.target.value }))}
-              />
-            </div>
-          </div>
-
-          {/* Weekday Schedule */}
-          <div>
-            <h3 className="text-sm font-extrabold text-slate-700 tracking-tight mb-3">🕒 Weekly Operating Hours</h3>
-            <div className="space-y-3">
-              {settingsForm.schedules.map((sch, idx) => (
-                <div key={sch.dayOfWeek} className="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-50/50 rounded-2xl border border-slate-100">
-                  <div className="flex items-center gap-3 w-36">
-                    <input
-                      type="checkbox"
-                      id={`sch-chk-${sch.dayOfWeek}`}
-                      checked={sch.enabled}
-                      onChange={(e) => handleScheduleChange(idx, "enabled", e.target.checked)}
-                      className="rounded text-blue-600 focus:ring-blue-500"
-                    />
-                    <label htmlFor={`sch-chk-${sch.dayOfWeek}`} className="text-sm font-semibold text-slate-700">
-                      {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][sch.dayOfWeek]}
-                    </label>
-                  </div>
-                  {sch.enabled && (
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="text"
-                        placeholder="HH:MM"
-                        className="border border-slate-200 rounded-lg px-2.5 py-1 text-sm w-20 text-center font-mono focus:border-blue-500 focus:outline-none font-bold text-slate-700 bg-white"
-                        value={sch.startTime}
-                        onChange={(e) => handleScheduleChange(idx, "startTime", e.target.value)}
-                      />
-                      <span className="text-slate-400 text-xs">to</span>
-                      <input
-                        type="text"
-                        placeholder="HH:MM"
-                        className="border border-slate-200 rounded-lg px-2.5 py-1 text-sm w-20 text-center font-mono focus:border-blue-500 focus:outline-none font-bold text-slate-700 bg-white"
-                        value={sch.endTime}
-                        onChange={(e) => handleScheduleChange(idx, "endTime", e.target.value)}
-                      />
-                    </div>
-                  )}
-                  {!sch.enabled && (
-                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider italic mr-4">Off-duty</span>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Schedule Overrides */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-extrabold text-slate-700 tracking-tight">📅 Schedule Overrides & Holidays</h3>
-              <button
-                type="button"
-                onClick={handleAddOverride}
-                className="text-xs bg-blue-50 text-blue-650 hover:bg-blue-100 font-black px-4 py-2 rounded-xl border border-blue-200 transition-all active:scale-95 cursor-pointer"
-              >
-                + Add Override
-              </button>
-            </div>
-            {settingsForm.overrides.length === 0 ? (
-              <p className="text-xs text-slate-400 italic bg-slate-50/50 p-5 rounded-2xl border border-slate-100 text-center font-bold">No overrides configured.</p>
-            ) : (
-              <div className="space-y-3.5">
-                {settingsForm.overrides.map((ovr, idx) => (
-                  <div key={idx} className="flex flex-wrap items-center justify-between gap-4 p-4 bg-slate-50/50 rounded-2xl border border-slate-200/60 shadow-2xs">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <input
-                        type="date"
-                        className="border border-slate-200 rounded-xl px-3.5 py-1.5 text-sm font-bold text-slate-700 focus:border-blue-500 focus:outline-none bg-white"
-                        value={ovr.date}
-                        onChange={(e) => handleOverrideChange(idx, "date", e.target.value)}
-                      />
-                      
-                      <label className="flex items-center gap-1.5 text-xs text-slate-500 font-bold select-none cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={ovr.enabled}
-                          onChange={(e) => handleOverrideChange(idx, "enabled", e.target.checked)}
-                          className="rounded text-blue-650 focus:ring-blue-500"
-                        />
-                        Working
-                      </label>
-
-                      {ovr.enabled && (
-                        <label className="flex items-center gap-1.5 text-xs text-slate-500 font-bold select-none cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={ovr.isFullDay}
-                            onChange={(e) => handleOverrideChange(idx, "isFullDay", e.target.checked)}
-                            className="rounded text-blue-650 focus:ring-blue-500"
-                          />
-                          Full Day Leave
-                        </label>
-                      )}
-                    </div>
-
-                    {ovr.enabled && !ovr.isFullDay ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          placeholder="HH:MM"
-                          className="border border-slate-200 rounded-lg px-2.5 py-1 text-xs w-16 text-center font-mono focus:border-blue-500 focus:outline-none font-bold text-slate-700 bg-white"
-                          value={ovr.startTime}
-                          onChange={(e) => handleOverrideChange(idx, "startTime", e.target.value)}
-                        />
-                        <span className="text-slate-400 text-[10px]">to</span>
-                        <input
-                          type="text"
-                          placeholder="HH:MM"
-                          className="border border-slate-200 rounded-lg px-2.5 py-1 text-xs w-16 text-center font-mono focus:border-blue-500 focus:outline-none font-bold text-slate-700 bg-white"
-                          value={ovr.endTime}
-                          onChange={(e) => handleOverrideChange(idx, "endTime", e.target.value)}
-                        />
-                      </div>
-                    ) : (
-                      <span className="text-xs text-rose-500 font-black bg-rose-50 border border-rose-100 rounded-lg px-3 py-1 uppercase tracking-wider">Holiday/Leave</span>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveOverride(idx)}
-                      className="text-xs text-rose-500 hover:text-rose-700 font-bold px-3 py-1 hover:bg-rose-50 rounded-xl transition border-none bg-transparent cursor-pointer"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="pt-4 border-t border-slate-100 flex justify-end">
-            <button
-              type="submit"
-              className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold px-6 py-3 rounded-xl transition-all text-xs shadow-md active:scale-98 border-none cursor-pointer"
-            >
-              Save Doctor Settings
-            </button>
-          </div>
-
-        </form>
-      </div>
 
       {/* ── Clinical Modal (EMR Entry/Edit) ─────────────────────────────────── */}
       {clinicalModalOpen && (

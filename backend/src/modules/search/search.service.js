@@ -87,6 +87,11 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
     // Stage 2: Candidate Doctors (LOCK 3, 31)
     let candidates = await getCandidateDoctors(specKeywords);
 
+    // Fallback: If no specialist doctor is found for the mapped symptom, fallback to General Medicine
+    if (candidates.length === 0 && specKeywords.length > 0) {
+      candidates = await getCandidateDoctors(["General Medicine", "General Physician"]);
+    }
+
     if (!symptomMatch) {
       const qLower = normalizedRaw.toLowerCase();
       candidates = candidates.filter(doc =>
@@ -94,6 +99,11 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
         doc.specialization.toLowerCase().includes(qLower) ||
         (doc.hospitalId && doc.hospitalId.name && doc.hospitalId.name.toLowerCase().includes(qLower))
       );
+
+      // If text search returned 0 candidates, fallback to General Medicine doctors
+      if (candidates.length === 0) {
+        candidates = await getCandidateDoctors(["General Medicine", "General Physician"]);
+      }
     }
 
     // Stage 3: Availability Filter (LOCK 7, 18 - Optimized for Phase 14.6)

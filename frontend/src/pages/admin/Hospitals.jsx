@@ -1,17 +1,24 @@
 import { useState, useEffect } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import { 
   Building, 
   Settings, 
   Power, 
   PowerOff, 
   Trash2, 
-  RefreshCw 
+  RefreshCw,
+  Users,
+  ChevronRight
 } from "lucide-react";
 
 export default function Hospitals() {
-  const [hospitals, setHospitals] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const cachedHospitals = getCachedData("admin_hospitals_list");
+
+  const [hospitals, setHospitals] = useState(cachedHospitals || []);
+  const [loading, setLoading] = useState(!cachedHospitals);
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [capacity, setCapacity] = useState(100);
@@ -20,13 +27,14 @@ export default function Hospitals() {
   const [bookingWindowDays, setBookingWindowDays] = useState(7);
   const [bookingCutoffMinutes, setBookingCutoffMinutes] = useState(30);
 
-  const fetchHospitals = async () => {
+  const fetchHospitals = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent && !cachedHospitals) setLoading(true);
       const res = await api.get("/admin/hospitals");
       if (res.data.success) {
         const list = Array.isArray(res.data.data) ? res.data.data : (res.data.data?.data || []);
         setHospitals(list);
+        setCachedData("admin_hospitals_list", list);
       }
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load hospitals");
@@ -161,6 +169,18 @@ export default function Hospitals() {
                   <span className="text-slate-655 font-bold italic">{hosp.operationalNotice || "No active notices."}</span>
                 </div>
               </div>
+
+              {/* View Doctors Roster Button Banner */}
+              <button
+                onClick={() => navigate(`/admin/hospitals/${hosp._id}`)}
+                className="w-full flex items-center justify-between bg-cyan-50 hover:bg-cyan-100 text-[#0E7490] border border-cyan-200/70 p-3 rounded-2xl transition duration-200 cursor-pointer font-extrabold text-xs group"
+              >
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-[#0E7490]" />
+                  <span>View Hospital Doctors & Duty Roster</span>
+                </div>
+                <ChevronRight className="w-4 h-4 text-[#0E7490] group-hover:translate-x-1 transition-transform" />
+              </button>
             </div>
 
             {/* Actions Panel */}

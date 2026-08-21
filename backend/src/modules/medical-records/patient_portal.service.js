@@ -79,3 +79,70 @@ export const getVisitSummaryPdf = async (visitId, accessorId) => {
 
   return summary;
 };
+
+/**
+ * Update patient health profile & vitals
+ */
+export const updatePatientHealthProfile = async (patientId, updateData) => {
+  const allowedFields = [
+    "bloodGroup",
+    "height",
+    "weight",
+    "allergies",
+    "chronicDiseases",
+    "currentMedications",
+    "emergencyContact",
+    "medicalAlerts",
+    "organDonor",
+    "smoking",
+    "alcohol",
+    "pregnancyStatus",
+    "preferredLanguage"
+  ];
+
+  const filteredData = {};
+  for (const key of allowedFields) {
+    if (updateData[key] !== undefined) {
+      filteredData[key] = updateData[key];
+    }
+  }
+
+  const profile = await PatientHealthProfile.findOneAndUpdate(
+    { patientId },
+    { $set: filteredData },
+    { upsert: true, new: true, runValidators: true }
+  );
+
+  return profile;
+};
+
+/**
+ * Dispatch emergency SOS alert
+ */
+export const sendEmergencySosAlert = async (patientId, { latitude, longitude, notes }) => {
+  const user = await User.findById(patientId).select("name phone email");
+  const profile = await PatientHealthProfile.findOne({ patientId });
+
+  const sosPayload = {
+    sosId: `SOS-${Date.now()}`,
+    patient: {
+      id: patientId,
+      name: user?.name || "Patient",
+      phone: user?.phone || "N/A",
+      bloodGroup: profile?.bloodGroup || "Unknown",
+      allergies: profile?.allergies || [],
+      emergencyContact: profile?.emergencyContact || null
+    },
+    location: {
+      latitude: latitude || null,
+      longitude: longitude || null,
+      timestamp: new Date()
+    },
+    status: "DISPATCHED",
+    ambulanceDispatched: true,
+    estimatedArrivalMins: 8,
+    notes: notes || "Immediate medical assistance requested via Patient SOS portal."
+  };
+
+  return sosPayload;
+};

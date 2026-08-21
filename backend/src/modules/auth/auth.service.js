@@ -78,6 +78,7 @@ export const parseUserAgent = (uaString = "") => {
 export const generateTokens = async (user, req = null) => {
   let adminSessionId = undefined;
   const isAdmin = ["admin", "super_admin", "district_admin", "hospital_admin"].includes(user.role);
+
   if (isAdmin) {
     adminSessionId = new mongoose.Types.ObjectId().toString();
     await mongoose.model("AdminSession").create({
@@ -139,7 +140,7 @@ export const loginUser = async ({ email, password }, req = null) => {
     }
   }
 
-  const user = await User.findOne({ email:normalizedEmail });
+  const user = await User.findOne({ email: normalizedEmail });
   let isMatch = false;
 
   if (user) {
@@ -248,10 +249,11 @@ export const getMe = async (userId) => {
 };
 
 export const updateMe = async (userId, data) => {
-  const { name, phone } = data;
+  const { name, phone, avatar } = data;
   const update = {};
-  if (name) update.name = name;
-  if (phone) update.phone = phone;
+  if (name !== undefined) update.name = name;
+  if (phone !== undefined) update.phone = phone;
+  if (avatar !== undefined) update.avatar = avatar;
 
   const user = await User.findByIdAndUpdate(
     userId,

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import { 
   UserSquare, 
   Check, 
@@ -10,17 +11,20 @@ import {
 } from "lucide-react";
 
 export default function Doctors() {
-  const [doctors, setDoctors] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedDoctors = getCachedData("admin_doctors_list");
+
+  const [doctors, setDoctors] = useState(cachedDoctors || []);
+  const [loading, setLoading] = useState(!cachedDoctors);
   const [error, setError] = useState("");
 
-  const fetchDoctors = async () => {
+  const fetchDoctors = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent && !cachedDoctors) setLoading(true);
       const res = await api.get("/admin/doctors");
       if (res.data.success) {
         const list = Array.isArray(res.data.data) ? res.data.data : (res.data.data?.data || []);
         setDoctors(list);
+        setCachedData("admin_doctors_list", list);
       }
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load doctors database");

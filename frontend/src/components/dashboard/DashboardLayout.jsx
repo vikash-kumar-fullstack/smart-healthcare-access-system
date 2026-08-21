@@ -44,13 +44,14 @@ export default function DashboardLayout({ children, role }) {
         return {
           name: parsed.name || "User",
           email: parsed.email || "",
-          role: parsed.role || role
+          role: parsed.role || role,
+          avatar: parsed.avatar || null
         };
       } catch (e) {
         console.error(e);
       }
     }
-    return { name: "User", email: "", role: role };
+    return { name: "User", email: "", role: role, avatar: null };
   });
   const navigate = useNavigate();
   const location = useLocation();
@@ -117,7 +118,8 @@ export default function DashboardLayout({ children, role }) {
           setUser({
             name: parsed.name || "User",
             email: parsed.email || "",
-            role: parsed.role || role
+            role: parsed.role || role,
+            avatar: parsed.avatar || null
           });
         } else if (role === "doctor") {
           const docRes = await api.get("/doctors/profile").catch(() => null);
@@ -141,6 +143,41 @@ export default function DashboardLayout({ children, role }) {
     }
     fetchData();
   }, [role, location.pathname]);
+
+  // Sync user state dynamically when profile photo/details are updated anywhere in the app
+  useEffect(() => {
+    const syncUser = (e) => {
+      const updatedUser = e?.detail;
+      if (updatedUser) {
+        setUser({
+          name: updatedUser.name || "User",
+          email: updatedUser.email || "",
+          role: updatedUser.role || role,
+          avatar: updatedUser.avatar || null
+        });
+      } else {
+        const saved = localStorage.getItem("user");
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            setUser({
+              name: parsed.name || "User",
+              email: parsed.email || "",
+              role: parsed.role || role,
+              avatar: parsed.avatar || null
+            });
+          } catch (err) {}
+        }
+      }
+    };
+
+    window.addEventListener("user-updated", syncUser);
+    window.addEventListener("storage", syncUser);
+    return () => {
+      window.removeEventListener("user-updated", syncUser);
+      window.removeEventListener("storage", syncUser);
+    };
+  }, [role]);
 
   // Realtime notification listener
   useEffect(() => {
@@ -173,6 +210,9 @@ export default function DashboardLayout({ children, role }) {
     { name: "Dashboard", path: "/patient", icon: House },
     { name: "My Appointments", path: "/patient/appointments", icon: Calendar },
     { name: "Live Queue", path: "/patient/queue", icon: Clock },
+    { name: "Personal Vitals", path: "/patient/vitals", icon: Activity },
+    { name: "Family Health", path: "/patient/family", icon: Users },
+    { name: "Emergency SOS", path: "/patient/emergency", icon: ShieldAlert },
     { name: "Notifications", path: "/patient/notifications", icon: Bell, count: unreadCount },
     { name: "Medical History", path: "/patient/history", icon: History },
     { name: "Saved Hospitals", path: "/patient/saved", icon: Heart },
@@ -265,21 +305,20 @@ export default function DashboardLayout({ children, role }) {
     if (activeRole === "doctor") return "Doctor Workspace";
     return "Patient Workspace";
   };
-
   const menuLinks = getMenuLinks();
   const roleLabel = getRoleLabel();
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] text-slate-900 font-sans flex flex-col">
+    <div className="fixed inset-0 flex flex-col bg-[#F8FAFC] text-slate-900 font-sans overflow-hidden">
       {/* TOPBAR (72px) */}
-      <header className="fixed top-0 left-0 right-0 h-[72px] bg-white border-b border-slate-200/60 shadow-[0_2px_15px_rgba(0,0,0,0.015)] z-[var(--z-navbar)] px-4 md:px-6 flex items-center justify-between">
+      <header className="h-[72px] shrink-0 bg-white border-b border-slate-200/60 shadow-[0_2px_15px_rgba(0,0,0,0.015)] z-[var(--z-navbar)] px-4 md:px-6 flex items-center justify-between">
         
         {/* Left Side: Logo & Workspace Title */}
         <div className="flex items-center gap-4">
           {/* Hamburger (Mobile toggle) */}
           <button
             onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
-            className="p-2 text-slate-500 hover:bg-slate-100 rounded-xl lg:hidden focus:outline-none transition-colors"
+            className="p-2 text-slate-500 hover:bg-slate-100 rounded-xl lg:hidden focus:outline-none transition-colors border-none bg-transparent cursor-pointer"
           >
             {mobileSidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
@@ -288,12 +327,12 @@ export default function DashboardLayout({ children, role }) {
             <div className="bg-white p-1.5 rounded-xl shadow-sm border border-slate-100/85 transition-all duration-300 group-hover:shadow-md shrink-0">
               <img src={logoImg} alt="MediHospi Logo" className="w-9 h-9 object-contain rounded-lg" />
             </div>
-            <div className="flex flex-col text-left">
-              <span className="font-black text-lg leading-none tracking-tight">
+            <div className="hidden sm:block text-left">
+              <span className="text-base font-black tracking-tight text-slate-800 leading-none block">
                 <span className="text-[#0F4C81]">Medi</span>
                 <span className="text-[#14B8A6]">Hospi</span>
               </span>
-              <span className="text-[9px] font-bold text-[#64748B] mt-1 tracking-wide hidden sm:block">
+              <span className="text-[10px] font-bold text-slate-400 leading-none mt-1 block">
                 Smart HealthCare Access System
               </span>
             </div>
@@ -331,7 +370,7 @@ export default function DashboardLayout({ children, role }) {
 
           {/* Notifications bell */}
           <Link
-            to={getNotificationsPath()}
+            to={role === "receptionist" ? "/reception/notifications" : `/${role}/notifications`}
             onClick={handleClearNotifications}
             className="p-2.5 rounded-xl border border-slate-200/60 hover:bg-slate-50 relative text-slate-500 hover:text-slate-800 transition-all cursor-pointer"
           >
@@ -347,31 +386,44 @@ export default function DashboardLayout({ children, role }) {
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
-              className="flex items-center gap-2 p-1.5 rounded-xl border border-slate-200/60 hover:bg-slate-50 transition-all cursor-pointer"
+              className="flex items-center gap-2 p-1.5 rounded-xl border border-slate-200/60 hover:bg-slate-50 transition-all cursor-pointer bg-white"
             >
-              <div className="w-7.5 h-7.5 rounded-lg bg-gradient-to-br from-[#0F4C81] to-[#14B8A6] text-white flex items-center justify-center font-bold text-xs">
-                {user.name.charAt(0).toUpperCase()}
+              <div className="w-7.5 h-7.5 rounded-lg bg-gradient-to-br from-[#0F4C81] to-[#14B8A6] text-white flex items-center justify-center font-bold text-xs overflow-hidden shrink-0">
+                {user.avatar ? (
+                  <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
+                ) : (
+                  user.name ? user.name.charAt(0).toUpperCase() : "U"
+                )}
               </div>
               <span className="text-xs font-bold text-slate-700 hidden lg:inline-block pr-1">
-                {user.name.split(" ")[0]}
+                {user.name ? user.name.split(" ")[0] : "User"}
               </span>
             </button>
 
             {/* Dropdown Menu */}
             {profileDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-52 bg-white rounded-2xl border border-slate-200/60 shadow-xl py-2 z-[var(--z-dropdown)] animate-in fade-in slide-in-from-top-2 duration-[var(--transition-normal)]">
-                <div className="px-4 py-2 border-b border-slate-100 text-left">
-                  <h6 className="text-xs font-extrabold text-slate-800 leading-tight">{user.name}</h6>
-                  <p className="text-[10px] text-slate-400 mt-0.5 truncate">{roleLabel}</p>
+              <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl border border-slate-200/60 shadow-xl py-2 z-[var(--z-dropdown)] animate-in fade-in slide-in-from-top-2 duration-[var(--transition-normal)]">
+                <div className="px-4 py-2 border-b border-slate-100 text-left flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#0F4C81] to-[#14B8A6] text-white flex items-center justify-center font-black text-sm overflow-hidden shrink-0 border border-slate-200/60">
+                    {user.avatar ? (
+                      <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
+                    ) : (
+                      user.name ? user.name.charAt(0).toUpperCase() : "U"
+                    )}
+                  </div>
+                  <div className="overflow-hidden">
+                    <h6 className="text-xs font-extrabold text-slate-800 leading-tight truncate">{user.name}</h6>
+                    <p className="text-[10px] text-slate-400 mt-0.5 truncate">{roleLabel}</p>
+                  </div>
                 </div>
-                <div className="py-1">
+                <div className="py-1 text-left">
                   <Link
                     to={`/${role}/profile`}
                     onClick={() => setProfileDropdownOpen(false)}
                     className="flex items-center gap-2 px-4 py-2 text-xs text-slate-650 hover:bg-slate-50 transition-colors"
                   >
                     <User className="h-4 w-4 text-slate-400" />
-                    My Profile
+                    Profile
                   </Link>
                   <Link
                     to={`/${role}/settings`}
@@ -388,7 +440,7 @@ export default function DashboardLayout({ children, role }) {
                       setProfileDropdownOpen(false);
                       handleLogout();
                     }}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-xs text-rose-600 hover:bg-rose-50 transition-colors text-left"
+                    className="w-full flex items-center gap-2 px-4 py-2 text-xs text-rose-600 hover:bg-rose-50 transition-colors text-left border-none bg-transparent cursor-pointer"
                   >
                     <LogOut className="h-4 w-4" />
                     Sign Out
@@ -401,7 +453,7 @@ export default function DashboardLayout({ children, role }) {
 
       </header>
 
-      <div className="flex-1 flex pt-[72px] h-[calc(100vh-72px)] overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden relative w-full h-[calc(100vh-72px)] min-h-0">
         
         {/* SIDEBAR (280px) */}
         {/* Backdrop for mobile */}
@@ -413,12 +465,12 @@ export default function DashboardLayout({ children, role }) {
         )}
 
         <aside
-          className={`fixed lg:relative top-[72px] lg:top-0 bottom-0 left-0 w-[280px] bg-white border-r border-slate-250/50 flex flex-col justify-between shrink-0 z-[calc(var(--z-navbar)-1)] transition-transform duration-[var(--transition-normal)] lg:translate-x-0 ${
+          className={`fixed lg:relative top-0 bottom-0 left-0 w-[280px] h-full min-h-0 bg-white border-r border-slate-250/50 flex flex-col justify-between shrink-0 z-[calc(var(--z-navbar)-1)] transition-transform duration-[var(--transition-normal)] lg:translate-x-0 ${
             mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
           }`}
         >
           {/* Scrollable nav menu items */}
-          <nav className="p-4 space-y-1 overflow-y-auto flex-1">
+          <nav className="p-4 space-y-1 overflow-y-auto flex-1 min-h-0">
             {menuLinks.map((item) => {
               const Icon = item.icon;
               const hasTabParam = new URLSearchParams(location.search).has("tab");
@@ -457,7 +509,7 @@ export default function DashboardLayout({ children, role }) {
           </nav>
 
           {/* Quick Support strip in sidebar */}
-          <div className="p-4 border-t border-slate-100">
+          <div className="p-4 border-t border-slate-100 shrink-0">
             <div className="bg-slate-50 p-4.5 rounded-2xl text-left flex items-start gap-3">
               <HelpCircle className="h-5 w-5 text-[#0F4C81] shrink-0 mt-0.5" />
               <div>
@@ -472,7 +524,7 @@ export default function DashboardLayout({ children, role }) {
         </aside>
 
         {/* MAIN CONTENT AREA */}
-        <main className="flex-1 overflow-y-auto bg-[#F8FAFC] p-4 sm:p-6 lg:p-8 text-left">
+        <main className="flex-1 overflow-y-auto h-full min-h-0 bg-[#F8FAFC] p-4 sm:p-6 lg:p-8 text-left">
           <div className="max-w-7xl mx-auto">
             {children}
           </div>

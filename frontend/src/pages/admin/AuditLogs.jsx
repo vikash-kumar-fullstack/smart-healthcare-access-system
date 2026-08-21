@@ -1,20 +1,25 @@
 import { useState, useEffect } from "react";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import { Search, Terminal, RefreshCw } from "lucide-react";
 
 export default function AuditLogs() {
-  const [audits, setAudits] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedAudits = getCachedData("admin_audit_logs");
+
+  const [audits, setAudits] = useState(cachedAudits || []);
+  const [loading, setLoading] = useState(!cachedAudits);
   const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedAudit, setSelectedAudit] = useState(null);
 
-  const fetchAudits = async () => {
+  const fetchAudits = async (silent = false) => {
     try {
+      if (!silent && !cachedAudits) setLoading(true);
       const res = await api.get("/admin/audits");
       if (res.data.success) {
         const list = Array.isArray(res.data.data) ? res.data.data : (res.data.data?.data || []);
         setAudits(list);
+        setCachedData("admin_audit_logs", list);
       }
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load audit logs database");

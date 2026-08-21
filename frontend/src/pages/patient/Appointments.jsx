@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import toast from "react-hot-toast";
 import {
   Calendar,
@@ -18,10 +19,13 @@ import {
 
 export default function Appointments() {
   const navigate = useNavigate();
+  const cachedQueue = getCachedData("patient_queue");
+  const cachedHistory = getCachedData("patient_history");
+
   const [activeTab, setActiveTab] = useState("upcoming"); // 'upcoming' or 'history'
-  const [activeQueue, setActiveQueue] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [activeQueue, setActiveQueue] = useState(cachedQueue || null);
+  const [history, setHistory] = useState(cachedHistory || []);
+  const [loading, setLoading] = useState(!cachedQueue && !cachedHistory);
 
   // EMR Modal states
   const [selectedVisit, setSelectedVisit] = useState(null);
@@ -31,7 +35,6 @@ export default function Appointments() {
 
   const loadData = async () => {
     try {
-      setLoading(true);
       const [queueRes, historyRes] = await Promise.all([
         api.get("/queue/my").catch(() => null),
         api.get("/queue/history").catch(() => ({ data: { data: [] } }))
@@ -39,12 +42,28 @@ export default function Appointments() {
 
       if (queueRes?.data?.success && queueRes.data.data) {
         setActiveQueue(queueRes.data.data);
+        setCachedData("patient_queue", queueRes.data.data);
       } else {
         setActiveQueue(null);
+        setCachedData("patient_queue", null);
       }
 
       if (historyRes?.data?.success) {
-        setHistory(historyRes.data.data);
+        const rawData = Array.isArray(historyRes.data.data) ? historyRes.data.data : [];
+        const uniqueMap = new Map();
+        rawData.forEach((item) => {
+          const vId = typeof item.visitId === "object" ? item.visitId?._id : item.visitId;
+          const doctor = (item.doctorName || "").toLowerCase().trim();
+          const bookedTime = item.bookedAt ? new Date(item.bookedAt).getTime() : "";
+
+          const key = vId ? `v_${vId}` : `d_${doctor}_${bookedTime}`;
+          if (!uniqueMap.has(key)) {
+            uniqueMap.set(key, item);
+          }
+        });
+        const deduplicated = Array.from(uniqueMap.values());
+        setHistory(deduplicated);
+        setCachedData("patient_history", deduplicated);
       }
     } catch (err) {
       console.error("Failed to load appointments:", err);

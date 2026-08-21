@@ -1,12 +1,15 @@
 import { useState, useEffect } from "react";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import toast from "react-hot-toast";
 import { UserPlus, Power, Trash2, Key, Users, Clock, Shield, Search, ArrowRight } from "lucide-react";
 import Button from "../../components/landing/Button";
 
 export default function Receptionists() {
-  const [receptionists, setReceptionists] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedReps = getCachedData("admin_receptionists_list");
+
+  const [receptionists, setReceptionists] = useState(cachedReps || []);
+  const [loading, setLoading] = useState(!cachedReps);
   const [search, setSearch] = useState("");
 
   // Create Modal state
@@ -25,12 +28,13 @@ export default function Receptionists() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [newPassword, setNewPassword] = useState("");
 
-  const fetchReceptionists = async () => {
+  const fetchReceptionists = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent && !cachedReps) setLoading(true);
       const res = await api.get("/hospital/receptionists");
       if (res.data.success) {
         setReceptionists(res.data.data);
+        setCachedData("admin_receptionists_list", res.data.data);
       }
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to load receptionists list.");

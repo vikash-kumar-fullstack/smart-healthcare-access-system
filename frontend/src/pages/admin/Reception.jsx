@@ -69,6 +69,8 @@ export default function Reception() {
   const [overrideReason, setOverrideReason] = useState("");
   const [showOverrideModal, setShowOverrideModal] = useState(false);
 
+  const [displayLimit, setDisplayLimit] = useState(50);
+
   const fetchProfile = async () => {
     try {
       const res = await api.get("/reception/profile");
@@ -83,7 +85,7 @@ export default function Reception() {
   const fetchDoctors = async () => {
     try {
       const res = await api.get("/reception/doctors");
-      if (res.data.success) {
+      if (res.data.success && res.data.data && res.data.data.length > 0) {
         setDoctors(res.data.data);
       }
     } catch (err) {
@@ -96,7 +98,30 @@ export default function Reception() {
       setLoading(true);
       const res = await api.get(`/reception/dashboard?search=${search}`);
       if (res.data.success) {
-        setBookings(res.data.data);
+        const bData = res.data.data || [];
+        setBookings(bData);
+
+        // Fallback doctor extraction if doctors array is empty
+        if (bData.length > 0) {
+          const docMap = {};
+          bData.forEach(b => {
+            if (b.doctorId && (b.doctorId._id || b.doctorId.name)) {
+              const dId = b.doctorId._id || b.doctorId.name;
+              docMap[dId] = {
+                _id: dId,
+                name: b.doctorId.name || "Doctor",
+                specialization: b.doctorId.specialization || "General Medicine",
+                availabilityStatus: "Available",
+                consultationFee: b.doctorId.consultationFee || 500,
+                rating: b.doctorId.rating || 4.8
+              };
+            }
+          });
+          const fallbackDocs = Object.values(docMap);
+          if (fallbackDocs.length > 0) {
+            setDoctors(prev => (prev && prev.length > 0) ? prev : fallbackDocs);
+          }
+        }
       }
     } catch (err) {
       toast.error("Failed to load dashboard bookings.");
@@ -106,12 +131,8 @@ export default function Reception() {
   };
 
   useEffect(() => {
-    fetchProfile();
-    fetchDoctors();
-  }, []);
-
-  useEffect(() => {
-    fetchBookings();
+    // Run profile, doctors, and bookings fetches concurrently on mount
+    Promise.all([fetchProfile(), fetchDoctors(), fetchBookings()]);
   }, [search]);
 
   const handleRegisterWalkIn = async (e) => {
@@ -675,10 +696,20 @@ export default function Reception() {
             </div>
           ) : (
             <div className="bg-white border border-slate-200/60 rounded-[24px] shadow-sm overflow-hidden hover-card-trigger">
-              <div className="overflow-x-auto">
+              <div
+                className="max-h-[620px] overflow-y-auto overflow-x-auto"
+                onScroll={(e) => {
+                  const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+                  if (scrollHeight - scrollTop - clientHeight < 100) {
+                    if (displayLimit < filteredBookings.length) {
+                      setDisplayLimit(prev => Math.min(prev + 50, filteredBookings.length));
+                    }
+                  }
+                }}
+              >
                 <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                     <tr className="bg-slate-50 border-b border-slate-100 text-slate-550 font-black uppercase tracking-wider text-[10px]">
+                  <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-100">
+                     <tr className="text-slate-550 font-black uppercase tracking-wider text-[10px]">
                       <th className="px-5 py-3.5">Booking ID</th>
                       <th className="px-5 py-3.5">Patient Info</th>
                       <th className="px-5 py-3.5">Doctor Assigned</th>
@@ -688,7 +719,7 @@ export default function Reception() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-semibold text-slate-655">
-                    {filteredBookings.map(b => (
+                    {filteredBookings.slice(0, displayLimit).map(b => (
                       <tr key={b._id} className="hover:bg-slate-50/40 transition">
                         <td className="px-5 py-4 font-mono text-[#0E7490] font-black">{b.bookingNumber}</td>
                         <td className="px-5 py-4">
@@ -751,6 +782,23 @@ export default function Reception() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Table Pagination / Load More Footer Strip */}
+              {filteredBookings.length > 50 && (
+                <div className="p-4 bg-slate-50/80 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                  <span className="font-semibold text-slate-500">
+                    Showing first <strong className="text-slate-800 font-extrabold">{Math.min(displayLimit, filteredBookings.length)}</strong> of <strong className="text-slate-800 font-extrabold">{filteredBookings.length}</strong> total bookings. Scroll table or click below for more.
+                  </span>
+                  {displayLimit < filteredBookings.length && (
+                    <button
+                      onClick={() => setDisplayLimit(prev => Math.min(prev + 50, filteredBookings.length))}
+                      className="px-4 py-2 bg-[#0E7490] hover:bg-[#0c5f76] text-white rounded-xl font-extrabold transition shadow-xs cursor-pointer border-none text-xs"
+                    >
+                      Load More (+50)
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </>

@@ -76,12 +76,18 @@
   --color-muted: #94a3b8;
 }
 
+html, body, #root {
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
+
 body {
   font-family: var(--font-primary);
   background: var(--color-light);
   color: var(--color-dark);
-  margin: 0;
-  padding: 0;
 }
 
 /* Base Transition Class */

@@ -11,6 +11,12 @@ export default function Login() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Eagerly preload dashboard route JS chunks to eliminate navigation delay upon login
+    import("./patient/Dashboard").catch(() => {});
+    import("./doctor/Dashboard").catch(() => {});
+    import("./admin/Reception").catch(() => {});
+    import("./admin/Dashboard").catch(() => {});
+
     const params = new URLSearchParams(window.location.search);
     const errorParam = params.get("error");
     if (errorParam) {

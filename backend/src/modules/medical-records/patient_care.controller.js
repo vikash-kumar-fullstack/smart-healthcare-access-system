@@ -196,3 +196,23 @@ export const postConsentRevoke = asyncHandler(async (req, res) => {
     return errorResponse(res, err.message, 400);
   }
 });
+
+export const updatePortalVitals = asyncHandler(async (req, res) => {
+  try {
+    const patientId = req.user.userId || req.user.id;
+    const profile = await patientService.updatePatientHealthProfile(patientId, req.body);
+    return successResponse(res, profile, "Personal health profile & vitals updated successfully");
+  } catch (err) {
+    return errorResponse(res, err.message, 400);
+  }
+});
+
+export const dispatchEmergencySos = asyncHandler(async (req, res) => {
+  try {
+    const patientId = req.user.userId || req.user.id;
+    const sosData = await patientService.sendEmergencySosAlert(patientId, req.body);
+    return successResponse(res, sosData, "🚨 EMERGENCY SOS DISPATCHED: Ambulance & Hospital Ward Notified!");
+  } catch (err) {
+    return errorResponse(res, err.message, 400);
+  }
+});

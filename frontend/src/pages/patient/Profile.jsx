@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import api from "../../services/api";
 import toast from "react-hot-toast";
 import {
@@ -12,7 +12,8 @@ import {
   UserCheck,
   Edit2,
   Lock,
-  Camera
+  Camera,
+  Trash2
 } from "lucide-react";
 
 export default function Profile() {
@@ -21,6 +22,8 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState([]);
   const [fetchingSessions, setFetchingSessions] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const fileInputRef = useRef(null);
 
   // Edit form states
   const [editModalOpen, setEditModalOpen] = useState(false);
@@ -29,6 +32,116 @@ export default function Profile() {
     phone: ""
   });
   const [saving, setSaving] = useState(false);
+
+  const resizeImage = (file, maxWidth, maxHeight, quality = 0.85) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > maxWidth) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width = Math.round((width * maxHeight) / height);
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+
+          const dataUrl = canvas.toDataURL("image/jpeg", quality);
+          resolve(dataUrl);
+        };
+        img.onerror = (err) => reject(err);
+        img.src = event.target.result;
+      };
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleAvatarChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select a valid image file.");
+      return;
+    }
+
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error("Image file size must be less than 8MB.");
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      const compressedBase64 = await resizeImage(file, 350, 350, 0.85);
+      const res = await api.put("/auth/me", { avatar: compressedBase64 });
+      if (res.data?.success) {
+        toast.success("Profile photo updated successfully!");
+        const updatedUser = res.data.data;
+        setUser(updatedUser);
+
+        const cached = localStorage.getItem("user");
+        let newCached = { ...updatedUser };
+        if (cached) {
+          try {
+            newCached = { ...JSON.parse(cached), ...updatedUser };
+          } catch (err) {}
+        }
+        localStorage.setItem("user", JSON.stringify(newCached));
+
+        window.dispatchEvent(new CustomEvent("user-updated", { detail: newCached }));
+      }
+    } catch (err) {
+      console.error("Avatar upload error:", err);
+      toast.error(err.response?.data?.message || "Failed to upload avatar photo.");
+    } finally {
+      setUploadingAvatar(false);
+      if (e.target) e.target.value = "";
+    }
+  };
+
+  const handleRemoveAvatar = async (e) => {
+    e.stopPropagation();
+    if (!user?.avatar) return;
+    setUploadingAvatar(true);
+    try {
+      const res = await api.put("/auth/me", { avatar: null });
+      if (res.data?.success) {
+        toast.success("Profile photo removed.");
+        const updatedUser = res.data.data;
+        setUser(updatedUser);
+
+        const cached = localStorage.getItem("user");
+        let newCached = { ...updatedUser };
+        if (cached) {
+          try {
+            newCached = { ...JSON.parse(cached), ...updatedUser };
+          } catch (err) {}
+        }
+        localStorage.setItem("user", JSON.stringify(newCached));
+
+        window.dispatchEvent(new CustomEvent("user-updated", { detail: newCached }));
+      }
+    } catch (err) {
+      toast.error("Failed to remove profile photo.");
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
 
   const fetchSessions = async () => {
     try {
@@ -165,16 +278,58 @@ export default function Profile() {
         </div>
 
         {/* Profile Avatar / Overlay area */}
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={handleAvatarChange}
+          accept="image/*"
+          className="hidden"
+        />
+
         <div className="px-6 pb-6 relative text-left">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 -mt-12 sm:-mt-16 mb-4">
-            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-gradient-to-br from-[#0F4C81] to-[#14B8A6] text-white flex items-center justify-center font-black text-3xl shadow-md border-4 border-white shrink-0 relative group">
-              {user.name.charAt(0).toUpperCase()}
-              <div className="absolute inset-0 bg-black/45 rounded-3xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all cursor-pointer">
-                <Camera className="h-5 w-5" />
-              </div>
+            <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-3xl bg-gradient-to-br from-[#0F4C81] to-[#14B8A6] text-white flex items-center justify-center font-black text-3xl shadow-md border-4 border-white shrink-0 relative group overflow-hidden">
+              {user.avatar ? (
+                <img src={user.avatar} alt={user.name} className="w-full h-full object-cover" />
+              ) : (
+                user.name.charAt(0).toUpperCase()
+              )}
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingAvatar}
+                className="absolute inset-0 bg-black/55 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-all cursor-pointer text-white gap-1 p-2"
+                title="Click to upload profile photo"
+              >
+                {uploadingAvatar ? (
+                  <div className="animate-spin rounded-full h-6 w-6 border-2 border-white border-t-transparent" />
+                ) : (
+                  <>
+                    <Camera className="h-6 w-6 text-white drop-shadow-md" />
+                    <span className="text-[10px] font-black uppercase tracking-wider text-cyan-200">
+                      {user.avatar ? "Change" : "Upload"}
+                    </span>
+                  </>
+                )}
+              </button>
             </div>
+
             <div className="pb-1">
-              <h2 className="text-xl font-black text-slate-800">{user.name}</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-black text-slate-800">{user.name}</h2>
+                {user.avatar && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveAvatar}
+                    disabled={uploadingAvatar}
+                    className="text-slate-400 hover:text-rose-500 transition-colors p-1 rounded-lg hover:bg-rose-50 cursor-pointer"
+                    title="Remove profile photo"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
               <p className="text-xs text-slate-500 capitalize mt-0.5 font-semibold flex items-center gap-1.5">
                 <Shield className="h-3.5 w-3.5 text-[#14B8A6]" />
                 {user.role} Account

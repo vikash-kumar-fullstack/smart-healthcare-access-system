@@ -1,20 +1,24 @@
 import { useState, useEffect } from "react";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import { Calendar, Check, X, RefreshCw, AlertCircle } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function Schedules() {
-  const [leaves, setLeaves] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cachedLeaves = getCachedData("admin_schedules_leaves");
+
+  const [leaves, setLeaves] = useState(cachedLeaves || []);
+  const [loading, setLoading] = useState(!cachedLeaves);
   const [error, setError] = useState("");
   const [actioningId, setActioningId] = useState(null);
 
-  const fetchLeaves = async () => {
+  const fetchLeaves = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent && !cachedLeaves) setLoading(true);
       const res = await api.get("/schedule/leaves");
       if (res.data.success) {
         setLeaves(res.data.data);
+        setCachedData("admin_schedules_leaves", res.data.data);
       }
     } catch (err) {
       setError(err.response?.data?.message || "Failed to load leave schedules.");

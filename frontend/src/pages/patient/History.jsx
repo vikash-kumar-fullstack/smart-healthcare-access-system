@@ -1,13 +1,29 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import api from "../../services/api";
+import { getCachedData, setCachedData } from "../../services/apiCache";
 import toast from "react-hot-toast";
 
 import HistoryCard from "../../components/HistoryCard";
 
 export default function History() {
+  const rawCached = getCachedData("patient_history");
+  const initialHistory = useMemo(() => {
+    if (!Array.isArray(rawCached)) return [];
+    const uniqueMap = new Map();
+    rawCached.forEach((item) => {
+      const vId = typeof item.visitId === "object" ? item.visitId?._id : item.visitId;
+      const doctor = (item.doctorName || "").toLowerCase().trim();
+      const bookedTime = item.bookedAt ? new Date(item.bookedAt).getTime() : "";
+      const key = vId ? `v_${String(vId)}` : `d_${doctor}_${bookedTime}`;
+      if (!uniqueMap.has(key)) {
+        uniqueMap.set(key, item);
+      }
+    });
+    return Array.from(uniqueMap.values());
+  }, [rawCached]);
 
-  const [history, setHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [history, setHistory] = useState(initialHistory);
+  const [loading, setLoading] = useState(initialHistory.length === 0);
 
   // EMR Modal states
   const [selectedVisit, setSelectedVisit] = useState(null);
@@ -18,7 +34,28 @@ export default function History() {
   const fetchHistory = async () => {
     try {
       const res = await api.get("/queue/history");
-      setHistory(res.data.data);
+      const rawData = Array.isArray(res.data?.data)
+        ? res.data.data
+        : (Array.isArray(res.data?.data?.data) ? res.data.data.data : []);
+
+      // Robust deduplication by visitId or doctorName + bookedAt timestamp
+      const uniqueMap = new Map();
+      rawData.forEach((item) => {
+        const vId = typeof item.visitId === "object" ? item.visitId?._id : item.visitId;
+        const doctor = (item.doctorName || "").toLowerCase().trim();
+        const bookedTime = item.bookedAt ? new Date(item.bookedAt).getTime() : "";
+
+        // Key prioritizes visitId if present, otherwise doctorName + bookedAt timestamp
+        const key = vId ? `v_${String(vId)}` : `d_${doctor}_${bookedTime}`;
+
+        if (!uniqueMap.has(key)) {
+          uniqueMap.set(key, item);
+        }
+      });
+
+      const deduplicated = Array.from(uniqueMap.values());
+      setHistory(deduplicated);
+      setCachedData("patient_history", deduplicated);
     } catch (err) {
       console.log(err);
     } finally {

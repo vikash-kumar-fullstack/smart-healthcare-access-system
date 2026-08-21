@@ -1977,7 +1977,7 @@ export const getQueueHistory = async (userId, queryOptions = {}) => {
   }
 
   const VisitModel = mongoose.model("Visit");
-  const data = await Promise.all(historyDocs.map(async q => {
+  const rawList = await Promise.all(historyDocs.map(async q => {
     const visitDoc = await VisitModel.findOne({ queueId: q._id, deletedAt: null }).maxTimeMS(2000).lean();
     const status = q.status;
     const outcomeMap = {
@@ -2001,6 +2001,19 @@ export const getQueueHistory = async (userId, queryOptions = {}) => {
       publicId: visitDoc?.publicId || null
     };
   }));
+
+  // Deduplicate on backend by visitId or doctorName + bookedAt timestamp
+  const seenKeys = new Set();
+  const data = rawList.filter(item => {
+    const vId = item.visitId ? String(item.visitId) : null;
+    const doctor = (item.doctorName || "").toLowerCase().trim();
+    const bookedTime = item.bookedAt ? new Date(item.bookedAt).getTime() : "";
+    const key = vId ? `v_${vId}` : `d_${doctor}_${bookedTime}`;
+
+    if (seenKeys.has(key)) return false;
+    seenKeys.add(key);
+    return true;
+  });
 
   if (isPaginated) {
     return {

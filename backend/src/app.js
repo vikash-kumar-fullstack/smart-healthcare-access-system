@@ -77,8 +77,8 @@ app.use((req, res, next) => {
 });
 
 // ── Body & logging ────────────────────────────────────────────────────────────
-app.use(express.json({ limit: "10kb" }));   // Prevent large payload attacks
-app.use(express.urlencoded({ extended: false }));
+app.use(express.json({ limit: "10mb" }));   // Allow profile photo data uploads
+app.use(express.urlencoded({ extended: false, limit: "10mb" }));
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 // ── Health check ──────────────────────────────────────────────────────────────
