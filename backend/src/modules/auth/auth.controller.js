@@ -283,6 +283,20 @@ export const revokeAllSessions = asyncHandler(async (req, res) => {
   return successResponse(res, null, "All sessions revoked successfully");
 });
 
+const getRedirectUri = (req) => {
+  if (process.env.GOOGLE_CALLBACK_URL) return process.env.GOOGLE_CALLBACK_URL;
+  const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  const host = req.get("host") || "localhost:5000";
+  return `${protocol}://${host}/api/v1/auth/google/callback`;
+};
+
+const getClientUrl = (req) => {
+  if (process.env.CLIENT_URL) return process.env.CLIENT_URL;
+  const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
+  const host = req.get("host") || "localhost:5173";
+  return `${protocol}://${host}`;
+};
+
 export const initiateGoogleAuth = (role) => {
   return (req, res) => {
     const randomState = crypto.randomBytes(16).toString("hex");
@@ -301,7 +315,7 @@ export const initiateGoogleAuth = (role) => {
     });
 
     const clientId = process.env.GOOGLE_CLIENT_ID;
-    const redirectUri = process.env.GOOGLE_CALLBACK_URL || "http://localhost:5000/api/v1/auth/google/callback";
+    const redirectUri = getRedirectUri(req);
 
     // Base64 encode the state payload (csrf + role + action)
     const statePayload = Buffer.from(JSON.stringify({ csrf: randomState, role, action })).toString("base64");
@@ -349,7 +363,7 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
       sameSite: isProd ? "none" : "lax",
       path: "/"
     });
-    return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent(errorMessage)}`);
+    return res.redirect(`${getClientUrl(req)}/login?error=${encodeURIComponent(errorMessage)}`);
   };
 
   if (!code || !state) {
@@ -410,7 +424,7 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
 
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const redirectUri = process.env.GOOGLE_CALLBACK_URL || "http://localhost:5000/api/v1/auth/google/callback";
+  const redirectUri = getRedirectUri(req);
 
   if (clientId && !code.includes("@")) {
     try {
@@ -449,7 +463,7 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
       avatar = profile.picture || null;
       googleId = profile.sub;
     } catch (err) {
-      return res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/login?error=${encodeURIComponent(err.message)}`);
+      return res.redirect(`${getClientUrl(req)}/login?error=${encodeURIComponent(err.message)}`);
     }
   } else {
     email = code;
@@ -561,6 +575,6 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
     });
   }
 
-  res.redirect(`${process.env.CLIENT_URL || "http://localhost:5173"}/oauth/success`);
+  res.redirect(`${getClientUrl(req)}/oauth/success`);
 });
 
