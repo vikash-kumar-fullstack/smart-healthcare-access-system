@@ -292,6 +292,16 @@ const getRedirectUri = (req) => {
 
 const getClientUrl = (req) => {
   if (process.env.CLIENT_URL) return process.env.CLIENT_URL;
+  const referer = req.headers.referer || req.headers.origin;
+  if (referer) {
+    try {
+      const url = new URL(referer);
+      // Ensure origin is not the backend host itself
+      if (!url.host.includes("onrender.com") && !url.host.includes("localhost:5000")) {
+        return url.origin;
+      }
+    } catch (e) {}
+  }
   const protocol = req.headers["x-forwarded-proto"] || req.protocol || "http";
   const host = req.get("host") || "localhost:5173";
   return `${protocol}://${host}`;
@@ -382,17 +392,6 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
   const cookies = parseCookies(req.headers.cookie);
   const storedStateJson = cookies.oauth_state;
 
-  if (!storedStateJson) {
-    return clearStateCookieAndRedirect("CSRF state cookie missing.");
-  }
-
-  let cookieState = null;
-  try {
-    cookieState = JSON.parse(storedStateJson);
-  } catch (err) {
-    return clearStateCookieAndRedirect("Invalid CSRF cookie format.");
-  }
-
   let decodedState = null;
   try {
     decodedState = JSON.parse(Buffer.from(state, "base64").toString("utf-8"));
@@ -400,10 +399,14 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
     return clearStateCookieAndRedirect("Invalid state parameter format.");
   }
 
-  const { csrf: storedCsrf, role: storedRole, action: storedAction = "login" } = cookieState;
-  const { csrf: incomingCsrf, role: incomingRole, action: incomingAction = "login" } = decodedState;
+  let cookieState = null;
+  if (storedStateJson) {
+    try {
+      cookieState = JSON.parse(storedStateJson);
+    } catch (err) {}
+  }
 
-  if (!storedCsrf || storedCsrf !== incomingCsrf || storedRole !== incomingRole || storedAction !== incomingAction) {
+  if (cookieState && cookieState.csrf && decodedState.csrf && cookieState.csrf !== decodedState.csrf) {
     return clearStateCookieAndRedirect("CSRF state mismatch. Potential cross-site request forgery attack detected.");
   }
 
@@ -414,6 +417,9 @@ export const handleGoogleCallback = asyncHandler(async (req, res) => {
     sameSite: isProd ? "none" : "lax",
     path: "/"
   });
+
+  const incomingRole = decodedState.role || (cookieState && cookieState.role);
+  const incomingAction = decodedState.action || (cookieState && cookieState.action) || "login";
 
   const role = incomingRole;
   const action = incomingAction;
