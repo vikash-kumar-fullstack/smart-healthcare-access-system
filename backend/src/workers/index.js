@@ -4,6 +4,11 @@ import { cleanupRetentionPolicies } from "./retention.worker.js";
 import { runBiWarehouseIngestion } from "./bi.worker.js";
 
 export const initializeWorkers = () => {
+  if (process.env.ENABLE_BACKGROUND_WORKERS === "false") {
+    console.log("[WORKER MANAGER] All background workers disabled for web service.");
+    return;
+  }
+
   console.log("[WORKER MANAGER] Initializing isolated cron workers...");
 
   // Daily backup at 2:00 AM

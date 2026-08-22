@@ -24,22 +24,26 @@ initSocket(server);
 
 // Connect DB
 connectDB().then(() => {
-  // Initialize cron schedules
-  initCronJobs();
-  // Initialize isolated background cron jobs
-  initializeWorkers();
-  // Initialize background notification processing workers
-  initNotificationWorkers(500);
-  // Initialize background search analytics processing workers
-  initSearchWorkers(500);
-  // Initialize health telemetry worker
-  initHealthWorker(60000);
-  // Initialize async report builder worker
-  initReportWorker(5000);
-  // Initialize realtime retry and cleanup workers
-  initRealtimeWorkers(2000);
-  // Initialize appointment reminder & no-show worker
-  startReminderWorker(10000);
+  if (process.env.ENABLE_BACKGROUND_WORKERS === "false") {
+    console.log("[WORKER MANAGER] All background workers disabled for web service.");
+  } else {
+    // Initialize cron schedules
+    initCronJobs();
+    // Initialize isolated background cron jobs
+    initializeWorkers();
+    // Initialize background notification processing workers
+    initNotificationWorkers(500);
+    // Initialize background search analytics processing workers
+    initSearchWorkers(500);
+    // Initialize health telemetry worker
+    initHealthWorker(60000);
+    // Initialize async report builder worker
+    initReportWorker(5000);
+    // Initialize realtime retry and cleanup workers
+    initRealtimeWorkers(2000);
+    // Initialize appointment reminder & no-show worker
+    startReminderWorker(10000);
+  }
 });
 
 server.listen(PORT, () => {
