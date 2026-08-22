@@ -25,13 +25,17 @@ export const initializeWorkers = () => {
   });
 
   // Every 30 seconds BI warehouse incremental ingestion
-  cron.schedule("*/30 * * * * *", async () => {
-    try {
-      await runBiWarehouseIngestion();
-    } catch (err) {
-      console.error("[CRON] BI incremental ingestion worker crashed:", err);
-    }
-  });
+  if (process.env.ENABLE_BI_WAREHOUSE_WORKER === "false") {
+    console.log("[WORKER MANAGER] BI warehouse worker disabled for web service.");
+  } else {
+    cron.schedule("*/30 * * * * *", async () => {
+      try {
+        await runBiWarehouseIngestion();
+      } catch (err) {
+        console.error("[CRON] BI incremental ingestion worker crashed:", err);
+      }
+    });
+  }
   
   console.log("[WORKER MANAGER] Isolated cron workers successfully scheduled.");
 };
