@@ -31,7 +31,7 @@ import toast from "react-hot-toast";
 import { useRealtime } from "../RealtimeProvider";
 
 export default function DashboardLayout({ children, role }) {
-  const { connectionState, subscribe } = useRealtime() || { connectionState: "OFFLINE" };
+  const { connectionState, subscribe } = useRealtime() || { connectionState: "ONLINE" };
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -356,15 +356,32 @@ export default function DashboardLayout({ children, role }) {
 
         {/* Right Side: Status, Notifications and Profile */}
         <div className="flex items-center gap-3.5">
-          {/* Live Sync Status */}
+          {/* Live Connectivity Status */}
           <span
+            title={
+              connectionState === "ONLINE"
+                ? "Core API and Live Sync active"
+                : connectionState === "DEGRADED"
+                ? "Core API operational; realtime sync reconnecting"
+                : "Application offline. Attempting to reconnect..."
+            }
             className={`hidden sm:inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${
-              connectionState === "LIVE"
+              connectionState === "ONLINE"
                 ? "border-emerald-250 bg-emerald-50 text-emerald-700"
+                : connectionState === "DEGRADED"
+                ? "border-amber-250 bg-amber-50 text-amber-700"
                 : "border-rose-250 bg-rose-50 text-rose-700 animate-pulse"
             }`}
           >
-            <span className={`h-1.5 w-1.5 rounded-full ${connectionState === "LIVE" ? "bg-emerald-500" : "bg-rose-500"}`} />
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                connectionState === "ONLINE"
+                  ? "bg-emerald-500"
+                  : connectionState === "DEGRADED"
+                  ? "bg-amber-500"
+                  : "bg-rose-500"
+              }`}
+            />
             {connectionState}
           </span>
 

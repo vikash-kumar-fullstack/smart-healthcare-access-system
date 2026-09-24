@@ -92,6 +92,13 @@ app.get("/health", (req, res) => {
     env: process.env.NODE_ENV || "development"
   });
 });
+app.get("/api/v1/health", (req, res) => {
+  res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    env: process.env.NODE_ENV || "development"
+  });
+});
 
 // ── Readonly Global Middleware ────────────────────────────────────────────────
 app.use(checkEmergencyReadonly);

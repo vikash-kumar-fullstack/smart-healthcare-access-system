@@ -136,9 +136,42 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
       }
     }
 
-    // Circuit Breaker Trigger (Freeze Correction 4)
+    // Safety fallback: if availability filter resulted in 0 available candidates,
+    // first attempt to check if General Medicine doctors are available
+    if (filteredCandidates.length === 0 && specKeywords.length > 0) {
+      const fallbackCandidates = await getCandidateDoctors(["General Medicine", "General Physician"]);
+      const fallbackDocIds = fallbackCandidates.map(d => d._id);
+      const fallbackSnapshots = await DoctorAvailabilitySnapshot.find({ doctorId: { $in: fallbackDocIds } });
+      const fallbackMap = new Map(fallbackSnapshots.map(s => [s.doctorId.toString(), s]));
+      for (const fDoc of fallbackCandidates) {
+        let snap = fallbackMap.get(fDoc._id.toString());
+        if (snap && snap.available) {
+          filteredCandidates.push({ doctor: fDoc, snapshot: snap });
+        }
+      }
+    }
+
+    // If still 0 available candidates but candidate doctors exist for the specialty (e.g. off-duty / after-hours),
+    // include candidate doctors with their next-available slot info rather than returning an empty screen!
+    if (filteredCandidates.length === 0 && evaluated.length > 0) {
+      for (const { doc, snapshot } of evaluated) {
+        filteredCandidates.push({
+          doctor: doc,
+          snapshot: snapshot || { available: false, currentQueue: 0, nextAvailable: "Next Session" }
+        });
+      }
+    }
+
+    // Circuit Breaker Trigger:
+    // Only enter Degraded High-Traffic Mode if:
+    // - Candidate pool exceeds processing limit (>100 candidates)
+    // - Explicitly configured emergency degraded mode is enabled
+    // - Or an actual extreme system timeout (>3500ms safety threshold) occurs
     const midTime = Date.now();
-    const isCircuitBroken = (filteredCandidates.length > 100) || (process.env.NODE_ENV !== "test" && (midTime - startTime > 800));
+    const candidateLimit = parseInt(process.env.SEARCH_DEGRADED_CANDIDATE_THRESHOLD) || 100;
+    const isCircuitBroken = (filteredCandidates.length > candidateLimit) ||
+      (process.env.SEARCH_DEGRADED_MODE === "true") ||
+      (process.env.NODE_ENV !== "test" && (midTime - startTime > 3500));
 
     if (isCircuitBroken) {
       mode = "degraded";
@@ -201,7 +234,7 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
           userId,
           doctor,
           ranking.distance,
-          specKeywords.includes(doctor.specialization)
+          specKeywords.some(k => k.toLowerCase() === (doctor.specialization || "").toLowerCase())
         );
 
         return {
@@ -325,7 +358,8 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
 
   // 5. Caching Results (LOCK 9, 25, Small corrections)
   const sizeBytes = Buffer.byteLength(JSON.stringify(payload));
-  if (sizeBytes <= 256000) {
+  // Only cache when results exist to avoid persisting transient 0-result states
+  if (clientResults.length > 0 && sizeBytes <= 256000) {
     await SearchCache.create({
       key: cacheKey,
       results: clientResults,

@@ -30,7 +30,6 @@ const symptomDictionarySchema = new mongoose.Schema({
   }]
 }, { timestamps: true });
 
-symptomDictionarySchema.index({ name: 1 }, { unique: true });
 symptomDictionarySchema.index({ aliases: 1 });
 
 const SymptomDictionary = mongoose.model("SymptomDictionary", symptomDictionarySchema);

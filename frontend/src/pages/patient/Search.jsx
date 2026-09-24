@@ -663,7 +663,7 @@ export default function PatientSearch() {
                     {presetSymptoms.map((preset, index) => (
                       <button
                         key={index}
-                        onClick={() => selectPresetOrSuggestion(preset.label.split(" ")[0])}
+                        onClick={() => selectPresetOrSuggestion(preset.label)}
                         className="flex flex-col items-center justify-center p-4 border border-slate-100 rounded-2xl hover:border-blue-200 hover:bg-blue-50/30 transition-all duration-200 group active:scale-[0.97]"
                       >
                         <span className="text-2xl mb-2 group-hover:scale-110 transition-transform">{preset.icon}</span>

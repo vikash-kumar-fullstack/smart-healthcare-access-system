@@ -11,12 +11,92 @@ const LEADER_KEY = "realtime_leader_tab";
 const TABS_KEY = "realtime_active_tabs";
 
 export const RealtimeProvider = ({ children }) => {
-  const [connectionState, setConnectionState] = useState("OFFLINE"); // LIVE, RECONNECTING, SYNCING, OFFLINE
+  const [realtimeState, setRealtimeState] = useState("OFFLINE"); // LIVE, RECONNECTING, SYNCING, OFFLINE
+  const [apiHealth, setApiHealth] = useState("HEALTHY"); // HEALTHY, UNAVAILABLE
   const [isLeader, setIsLeader] = useState(false);
   const socketRef = useRef(null);
   const listenersRef = useRef({});
   const sequenceBufferRef = useRef({});
   const processedKeysRef = useRef(new Set());
+  const failedPingsRef = useRef(0);
+
+  // Application-level core API health check engine
+  useEffect(() => {
+    let isMounted = true;
+    const checkApiHealth = async () => {
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        if (isMounted) setApiHealth("UNAVAILABLE");
+        return;
+      }
+      const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:5000/api/v1";
+      try {
+        const res = await axios.get(`${apiUrl}/health`, { timeout: 4000 });
+        if (res.data?.status === "healthy" || res.status === 200) {
+          if (isMounted) {
+            setApiHealth("HEALTHY");
+            failedPingsRef.current = 0;
+          }
+        } else {
+          failedPingsRef.current += 1;
+          if (failedPingsRef.current >= 2 && isMounted) {
+            setApiHealth("UNAVAILABLE");
+          }
+        }
+      } catch (err) {
+        failedPingsRef.current += 1;
+        if (failedPingsRef.current >= 2 && isMounted) {
+          setApiHealth("UNAVAILABLE");
+        }
+      }
+    };
+
+    checkApiHealth();
+    const interval = setInterval(checkApiHealth, 25000);
+
+    const handleOnline = () => {
+      failedPingsRef.current = 0;
+      checkApiHealth();
+    };
+    const handleOffline = () => {
+      if (isMounted) setApiHealth("UNAVAILABLE");
+    };
+    const handleApiSuccess = () => {
+      if (isMounted) {
+        setApiHealth("HEALTHY");
+        failedPingsRef.current = 0;
+      }
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("app-api-success", handleApiSuccess);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("app-api-success", handleApiSuccess);
+    };
+  }, []);
+
+  // Compute composite connectionState:
+  // - OFFLINE: Browser has no network OR Core API health check failed after retries.
+  // - ONLINE: Core API is healthy and reachable (and socket connected if authenticated).
+  // - DEGRADED: Core API is fully operational, but optional realtime sync socket is disconnected/reconnecting.
+  const isOnline = typeof navigator !== "undefined" ? navigator.onLine !== false : true;
+  let connectionState = "ONLINE";
+  if (!isOnline || apiHealth === "UNAVAILABLE") {
+    connectionState = "OFFLINE";
+  } else if (apiHealth === "HEALTHY") {
+    if (!token) {
+      connectionState = "ONLINE";
+    } else if (realtimeState === "LIVE") {
+      connectionState = "ONLINE";
+    } else {
+      connectionState = "DEGRADED";
+    }
+  }
 
   const getUserIdFromToken = (tokenVal) => {
     if (!tokenVal) {
@@ -174,7 +254,7 @@ export const RealtimeProvider = ({ children }) => {
   // Execute sync recovery via GET API
   const performSync = async () => {
     if (!token || !userId) return;
-    setConnectionState("SYNCING");
+    setRealtimeState("SYNCING");
 
     const currentSeq = getStoredCommittedSeq();
     try {
@@ -200,10 +280,10 @@ export const RealtimeProvider = ({ children }) => {
         processEventInOrder(evt);
       }
 
-      setConnectionState("LIVE");
+      setRealtimeState("LIVE");
     } catch (err) {
       console.error("[REALTIME SYNC] Recovery failed:", err);
-      setConnectionState("OFFLINE");
+      setRealtimeState("OFFLINE");
     }
   };
 
@@ -274,14 +354,14 @@ export const RealtimeProvider = ({ children }) => {
         socketRef.current = null;
       }
       if (token && !isLeader) {
-        setConnectionState("LIVE"); // Sub-tab relies on leader, label as active
+        setRealtimeState("LIVE"); // Sub-tab relies on leader, label as active
       } else {
-        setConnectionState("OFFLINE");
+        setRealtimeState("OFFLINE");
       }
       return;
     }
 
-    setConnectionState("RECONNECTING");
+    setRealtimeState("RECONNECTING");
     const socketUrl = import.meta.env.VITE_API_URL
       ? import.meta.env.VITE_API_URL.replace("/api/v1", "")
       : "http://localhost:5000";
@@ -320,12 +400,12 @@ export const RealtimeProvider = ({ children }) => {
 
     socket.on("connect_error", (err) => {
       console.error("[REALTIME LEADER] Connection error:", err.message);
-      setConnectionState("OFFLINE");
+      setRealtimeState("OFFLINE");
     });
 
     socket.on("disconnect", () => {
       console.log("[REALTIME LEADER] Disconnected.");
-      setConnectionState("OFFLINE");
+      setRealtimeState("OFFLINE");
     });
 
     // Send heartbeats every 15s to keep registry fresh
@@ -372,7 +452,7 @@ export const RealtimeProvider = ({ children }) => {
   }, [token]);
 
   return (
-    <RealtimeContext.Provider value={{ subscribe, connectionState, performSync }}>
+    <RealtimeContext.Provider value={{ subscribe, connectionState, realtimeState, apiHealth, performSync }}>
       {children}
     </RealtimeContext.Provider>
   );

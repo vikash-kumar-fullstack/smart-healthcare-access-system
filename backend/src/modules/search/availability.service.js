@@ -91,6 +91,9 @@ export const updateDoctorAvailabilitySnapshot = async (doctorId) => {
   // 5. Get next slot label
   const nextAvailable = available ? "Now" : await getNextAvailableSlot(doctorId, today);
 
+  const prevSnapshot = await DoctorAvailabilitySnapshot.findOne({ doctorId });
+  const hasStateChanged = !prevSnapshot || prevSnapshot.available !== available || prevSnapshot.currentQueue !== currentQueue;
+
   // 6. Update snapshot database document
   const snapshot = await DoctorAvailabilitySnapshot.findOneAndUpdate(
     { doctorId },
@@ -100,11 +103,13 @@ export const updateDoctorAvailabilitySnapshot = async (doctorId) => {
       nextAvailable,
       lastComputedAt: now
     },
-    { upsert: true, new: true }
+    { upsert: true, returnDocument: 'after' }
   );
 
-  // Invalidate cache by incrementing availability version
-  await incrementAvailabilityVersion();
+  // Invalidate cache only if availability state or queue depth meaningfully changed
+  if (hasStateChanged) {
+    await incrementAvailabilityVersion();
+  }
 
   return snapshot;
 };

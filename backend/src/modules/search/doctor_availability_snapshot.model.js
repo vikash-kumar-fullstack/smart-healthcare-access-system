@@ -29,7 +29,5 @@ const doctorAvailabilitySnapshotSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-doctorAvailabilitySnapshotSchema.index({ doctorId: 1 }, { unique: true });
-
 const DoctorAvailabilitySnapshot = mongoose.model("DoctorAvailabilitySnapshot", doctorAvailabilitySnapshotSchema);
 export default DoctorAvailabilitySnapshot;

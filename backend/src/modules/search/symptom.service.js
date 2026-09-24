@@ -7,7 +7,8 @@ export const normalizeQuery = (q) => {
   return q
     .toLowerCase()
     .trim()
-    .replace(/[^\w\s-]/g, "") // remove special characters except spaces/hyphens
+    .replace(/[&+/]/g, " ") // replace &, +, / with space so "fever & cough" -> "fever cough"
+    .replace(/[^\w\s-]/g, "") // remove other special characters except spaces/hyphens
     .replace(/\s+/g, " "); // collapse multiple spaces to single
 };
 
@@ -33,14 +34,12 @@ const findInMemorySymptomMatch = (normalized) => {
     if (item.aliases.some(a => a.toLowerCase() === normalized)) return item;
   }
 
-  // Token / Substring match
-  const tokens = normalized.split(" ");
+  // Token match
+  const tokens = normalized.split(/\s+/).filter(t => t.length > 2);
   for (const item of comprehensiveSymptomList) {
+    const nameTokens = item.name.toLowerCase().split(/\s+/);
     for (const token of tokens) {
-      if (token.length > 2) {
-        if (item.name.toLowerCase().includes(token)) return item;
-        if (item.aliases.some(a => a.toLowerCase().includes(token))) return item;
-      }
+      if (nameTokens.includes(token)) return item;
     }
   }
 
@@ -61,51 +60,112 @@ export const findMatchingSymptom = async (normalized) => {
   let aliasMatch = await SymptomDictionary.findOne({ aliases: normalized });
   if (aliasMatch) return aliasMatch;
 
-  // 3. Fetch all entries to perform Levenshtein spelling check (Threshold <= 2 edits)
+  // Fetch all entries from DB or memory
   const allSymptoms = await SymptomDictionary.find({});
-  if (allSymptoms.length > 0) {
-    for (const symptom of allSymptoms) {
-      if (getLevenshteinDistance(normalized, symptom.name) <= 2) {
-        return symptom;
-      }
-      for (const alias of symptom.aliases) {
-        if (getLevenshteinDistance(normalized, alias) <= 2) {
-          return symptom;
-        }
-      }
+  const sourceList = (allSymptoms && allSymptoms.length > 0) ? allSymptoms : comprehensiveSymptomList;
+
+  if (sourceList && sourceList.length > 0) {
+    // 3. Exact matching within list (case-insensitive)
+    for (const symptom of sourceList) {
+      if (symptom.name.toLowerCase() === normalized) return symptom;
+      if (symptom.aliases && symptom.aliases.some(a => a.toLowerCase() === normalized)) return symptom;
     }
 
-    // 4. Fallback: Check word-token substring matching
-    const tokens = normalized.split(" ");
-    for (const symptom of allSymptoms) {
-      for (const token of tokens) {
-        if (token.length > 2 && symptom.name.includes(token)) {
+    // 4. Levenshtein spelling check (Threshold <= 2 edits, for queries length >= 4)
+    if (normalized.length >= 4) {
+      for (const symptom of sourceList) {
+        if (getLevenshteinDistance(normalized, symptom.name.toLowerCase()) <= 2) {
           return symptom;
         }
-        for (const alias of symptom.aliases) {
-          if (token.length > 2 && alias.includes(token)) {
-            return symptom;
+        if (symptom.aliases) {
+          for (const alias of symptom.aliases) {
+            if (getLevenshteinDistance(normalized, alias.toLowerCase()) <= 2) {
+              return symptom;
+            }
           }
         }
       }
     }
 
-    // 5. Prefix-Length Fuzzy Match Fallback (e.g. "heache" -> "headache")
-    if (normalized.length >= 3) {
+    // 5. Check if query contains multiple distinct symptoms (e.g. "fever and cough" / "fever cough")
+    const stopWords = new Set(["and", "the", "with", "for", "have", "has", "feeling", "very", "severe", "mild", "bad", "acute", "chronic"]);
+    const rawTokens = normalized.split(/\s+/).map(t => t.trim().toLowerCase());
+    const meaningfulTokens = rawTokens.filter(t => t.length >= 3 && !stopWords.has(t));
+
+    const matchedMultiple = [];
+    for (const symptom of sourceList) {
+      const sName = symptom.name.toLowerCase();
+      const wordRegex = new RegExp(`(^|\\s)${sName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`, "i");
+      if (wordRegex.test(normalized)) {
+        matchedMultiple.push(symptom);
+      }
+    }
+
+    if (matchedMultiple.length === 1) {
+      return matchedMultiple[0];
+    } else if (matchedMultiple.length > 1) {
+      // Merge specializationIds from matched symptoms
+      const mergedSpecs = new Set();
+      matchedMultiple.forEach(m => m.specializationIds?.forEach(s => mergedSpecs.add(s.toLowerCase())));
+      return {
+        _id: matchedMultiple[0]._id,
+        name: matchedMultiple.map(m => m.name).join(" & "),
+        specializationIds: Array.from(mergedSpecs),
+        severity: matchedMultiple.some(m => m.severity === "high") ? "high" : "medium",
+        tags: ["combined_symptom"]
+      };
+    }
+
+    // 6. Intelligent whole-word token scoring to avoid substring collision bugs
+    let bestCandidate = null;
+    let highestScore = 0;
+
+    for (const symptom of sourceList) {
+      const sName = symptom.name.toLowerCase();
+      let score = 0;
+
+      for (const token of meaningfulTokens) {
+        const nameTokens = sName.split(/\s+/);
+        if (nameTokens.includes(token)) {
+          score += 60;
+        } else if (sName.startsWith(token) || sName.endsWith(token)) {
+          score += 30;
+        }
+
+        if (symptom.aliases) {
+          for (const alias of symptom.aliases) {
+            const aLower = alias.toLowerCase();
+            const aliasTokens = aLower.split(/\s+/);
+            if (aliasTokens.includes(token)) {
+              score += 40;
+            } else if (aLower === token) {
+              score += 70;
+            }
+          }
+        }
+      }
+
+      if (score > highestScore) {
+        highestScore = score;
+        bestCandidate = symptom;
+      }
+    }
+
+    if (bestCandidate && highestScore >= 30) {
+      return bestCandidate;
+    }
+
+    // 7. Prefix-Length Fuzzy Match Fallback (e.g. "heache" -> "headache")
+    if (normalized.length >= 4) {
       const prefix3 = normalized.slice(0, 3);
-      for (const symptom of allSymptoms) {
-        if (symptom.name.startsWith(prefix3) && Math.abs(symptom.name.length - normalized.length) <= 3) {
+      for (const symptom of sourceList) {
+        if (symptom.name.toLowerCase().startsWith(prefix3) && Math.abs(symptom.name.length - normalized.length) <= 3) {
           return symptom;
-        }
-        for (const alias of symptom.aliases) {
-          if (alias.startsWith(prefix3) && Math.abs(alias.length - normalized.length) <= 3) {
-            return symptom;
-          }
         }
       }
     }
   }
 
-  // 6. In-memory static dictionary fallback
+  // 8. In-memory static dictionary fallback
   return findInMemorySymptomMatch(normalized);
 };
