@@ -1,5 +1,6 @@
 import DoctorAnalyticsDaily from "../doctor/doctor_analytics_daily.model.js";
 import Queue from "../queue/queue.model.js";
+import { computeFahraScore } from "./fahra.service.js";
 
 // Haversine Distance helper (coordinates: [lng, lat])
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -14,7 +15,15 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-export const calculateRankingScore = async (doctor, patientCoords, symptomMatchSpecializations, currentQueue, availability) => {
+export const calculateRankingScore = async (
+  doctor,
+  patientCoords,
+  symptomMatchSpecializations,
+  currentQueue,
+  availability,
+  options = {}
+) => {
+  const { preference = "balanced", lastComputedAt = null, maxQueueLimit = 50 } = options;
   const why = [];
 
   // ── 1. Specialization Match Score (35%) ──
@@ -141,13 +150,44 @@ export const calculateRankingScore = async (doctor, patientCoords, symptomMatchS
     }
   }
 
-  // Multi-signal weighted calculation
+  // ── 6. FA-HRA Research Allocation Evaluation ──
+  const fahra = computeFahraScore({
+    estimatedWaitMinutes: estWait,
+    distanceKm,
+    currentQueue,
+    maxQueueLimit: doctor.defaultQueueLimit || maxQueueLimit,
+    lastComputedAt,
+    preference
+  });
+
+  if (fahra.freshness.state === "live") {
+    why.push("Live operational telemetry");
+  } else if (fahra.freshness.state === "recent") {
+    why.push("Recently updated operational data");
+  }
+
+  // Multi-signal weighted calculation with patient preference adjustments
+  let wSpec = 0.35, wDist = 0.20, wAvail = 0.20, wQ = 0.15, wRel = 0.10;
+  if (preference === "fastest") {
+    wSpec = 0.20;
+    wDist = 0.10;
+    wAvail = 0.25;
+    wQ = 0.35;
+    wRel = 0.10;
+  } else if (preference === "closest") {
+    wSpec = 0.20;
+    wDist = 0.45;
+    wAvail = 0.15;
+    wQ = 0.10;
+    wRel = 0.10;
+  }
+
   const finalScore = Math.round(
-    0.35 * specScore +
-    0.20 * distScore +
-    0.20 * availScore +
-    0.15 * qScore +
-    0.10 * relScore
+    wSpec * specScore +
+    wDist * distScore +
+    wAvail * availScore +
+    wQ * qScore +
+    wRel * relScore
   );
 
   return {
@@ -161,6 +201,13 @@ export const calculateRankingScore = async (doctor, patientCoords, symptomMatchS
       reliabilityScore: relScore,
       finalScore
     },
-    distance: distanceKm
+    distance: distanceKm,
+    estimatedWaitMinutes: estWait,
+    fahra: {
+      costScore: fahra.costScore,
+      suitabilityScore: fahra.suitabilityScore,
+      freshness: fahra.freshness,
+      preferenceUsed: preference
+    }
   };
 };

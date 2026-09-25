@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search as SearchIcon, X, MapPin, Compass, AlertCircle, Sparkles, Clock, Star, Shield, ArrowRight, Heart, Building } from "lucide-react";
+import { Search as SearchIcon, X, MapPin, Compass, AlertCircle, Sparkles, Clock, Star, Shield, ArrowRight, Heart, Building, CheckCircle2 } from "lucide-react";
 import toast from "react-hot-toast";
 import axios from "axios";
 import api from "../../services/api";
 import { DoctorCardSkeleton } from "../../components/Skeletons";
+import SearchResultCard from "../../components/search/SearchResultCard";
+import CarePathwayBanner from "../../components/search/CarePathwayBanner";
+import HealthcareDetailView from "../../components/search/HealthcareDetailView";
 
 
 export default function PatientSearch() {
@@ -24,6 +27,12 @@ export default function PatientSearch() {
   const [coords, setCoords] = useState({ lat: null, lng: null });
   const [locating, setLocating] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+
+  // Progressive Disclosure & Care Pathway States
+  const [preference, setPreference] = useState("balanced");
+  const [carePathway, setCarePathway] = useState(null);
+  const [detailDoctorId, setDetailDoctorId] = useState(null);
+  const [detailModalOpen, setDetailModalOpen] = useState(false);
 
   const [favorites, setFavorites] = useState([]);
   const [userId, setUserId] = useState("default");
@@ -190,13 +199,13 @@ export default function PatientSearch() {
         setCoords(parsed.coords || { lat: null, lng: null });
         setHasSearched(parsed.hasSearched || false);
         setNormalizedQuery(parsed.normalizedQuery || "");
+        setPreference(parsed.preference || "balanced");
+        setCarePathway(parsed.carePathway || null);
       } catch (e) {
         console.error("Failed to restore search state", e);
       }
     }
   }, []);
-
-
 
   // Save state on change
   const saveStateToSession = (updatedFields) => {
@@ -210,6 +219,8 @@ export default function PatientSearch() {
       coords,
       hasSearched,
       normalizedQuery,
+      preference,
+      carePathway,
       ...updatedFields
     };
     sessionStorage.setItem("patient_search_state", JSON.stringify(currentState));
@@ -305,7 +316,12 @@ export default function PatientSearch() {
   }, []);
 
   // 4. Core Search Execution
-  const executeSearchRequest = async (searchQuery, isLoadMore = false, currentCoords = coords) => {
+  const executeSearchRequest = async (
+    searchQuery,
+    isLoadMore = false,
+    currentCoords = coords,
+    currentPreference = preference
+  ) => {
     const trimmed = searchQuery.trim();
     if (!trimmed) return;
 
@@ -324,7 +340,7 @@ export default function PatientSearch() {
     }
 
     try {
-      let url = `/search?q=${encodeURIComponent(trimmed)}`;
+      let url = `/search?q=${encodeURIComponent(trimmed)}&preference=${currentPreference}`;
       if (currentCoords.lat && currentCoords.lng) {
         url += `&lat=${currentCoords.lat}&lng=${currentCoords.lng}`;
       }
@@ -345,6 +361,7 @@ export default function PatientSearch() {
         setNextCursor(searchResult.nextCursor || null);
         setHasMore(searchResult.hasMore || false);
         setNormalizedQuery(searchResult.normalizedQuery || "");
+        setCarePathway(searchResult.carePathway || null);
         setShowSuggestions(false);
 
         saveStateToSession({
@@ -355,14 +372,16 @@ export default function PatientSearch() {
           nextCursor: searchResult.nextCursor || null,
           hasMore: searchResult.hasMore || false,
           hasSearched: true,
-          normalizedQuery: searchResult.normalizedQuery || ""
+          normalizedQuery: searchResult.normalizedQuery || "",
+          preference: currentPreference,
+          carePathway: searchResult.carePathway || null
         });
 
         if (!isLoadMore) {
           if (searchResult.results.length === 0) {
             toast("No doctors matched this search query.", { icon: "🔍" });
           } else {
-            toast.success(`Found ${searchResult.results.length} doctor${searchResult.results.length === 1 ? "" : "s"}!`);
+            toast.success(`Found ${searchResult.results.length} healthcare option${searchResult.results.length === 1 ? "" : "s"}!`);
           }
         }
       }
@@ -378,6 +397,18 @@ export default function PatientSearch() {
         setLoadingMore(false);
       }
     }
+  };
+
+  const handlePreferenceChange = (newPref) => {
+    setPreference(newPref);
+    if (query.trim().length >= 2) {
+      executeSearchRequest(query, false, coords, newPref);
+    }
+  };
+
+  const handleViewDetails = (docId) => {
+    setDetailDoctorId(docId);
+    setDetailModalOpen(true);
   };
 
   // 1.5. URL Search Parameters listener
@@ -686,11 +717,21 @@ export default function PatientSearch() {
                 </div>
               )}
 
+              {/* Care Pathway & Decision Support Header */}
+              {hasSearched && carePathway && (
+                <CarePathwayBanner
+                  carePathway={carePathway}
+                  preference={preference}
+                  onSelectPreference={handlePreferenceChange}
+                  resultsCount={results.length}
+                />
+              )}
+
               {/* Results Header */}
               {hasSearched && (
-                <div className="flex items-center justify-between px-2">
-                  <h2 className="text-xl font-bold text-slate-800">
-                    Search Results
+                <div className="flex items-center justify-between px-2 mb-2">
+                  <h2 className="text-xl font-black text-slate-800 tracking-tight">
+                    Healthcare Options
                   </h2>
                   <span className="text-xs text-slate-400 font-semibold bg-slate-100 px-3 py-1 rounded-full">
                     Mode: {mode.toUpperCase()}
@@ -698,8 +739,8 @@ export default function PatientSearch() {
                 </div>
               )}
 
-              {/* Results List */}
-              <div className="space-y-4">
+              {/* Results List with Progressive Disclosure */}
+              <div className="space-y-6">
                 {loading ? (
                   <>
                     <DoctorCardSkeleton />
@@ -707,157 +748,100 @@ export default function PatientSearch() {
                     <DoctorCardSkeleton />
                   </>
                 ) : hasSearched && results.length === 0 ? (
-                  <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-12 text-center max-w-md mx-auto">
-                    <div className="w-16 h-16 bg-slate-50 text-slate-400 rounded-full flex items-center justify-center mx-auto text-2xl mb-4">
-                      🔍
+                  <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-10 text-center max-w-lg mx-auto">
+                    <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-3xl flex items-center justify-center mx-auto text-2xl mb-4 shadow-xs">
+                      🧭
                     </div>
-                    <h3 className="text-lg font-bold text-slate-800">No doctors found</h3>
-                    <p className="text-slate-500 text-sm mt-2">
-                      Try another symptom. We couldn't map your query to any active clinician.
+                    <h3 className="text-lg font-black text-slate-900">
+                      No Matching Clinicians Available Right Now
+                    </h3>
+                    <p className="text-slate-500 text-xs mt-2 leading-relaxed max-w-md mx-auto">
+                      We could not identify active specialists taking walk-in patients for "{query}". You can refine your search or explore common care pathways below.
                     </p>
+
+                    <div className="mt-6 pt-5 border-t border-slate-100">
+                      <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-3">
+                        Suggested Care Departments
+                      </span>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {["Fever & Infection", "Headache & Migraine", "Cough & Cold", "Stomach Pain", "Chest Pain"].map((term, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => selectPresetOrSuggestion(term)}
+                            className="text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200/60 px-3.5 py-1.5 rounded-xl transition cursor-pointer"
+                          >
+                            {term}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
                     <button
                       onClick={clearSearch}
-                      className="mt-6 inline-flex items-center gap-1.5 text-sm font-bold text-blue-600 hover:text-blue-700 transition"
+                      className="mt-6 inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-800 transition"
                     >
-                      Clear search and try again
-                      <ArrowRight className="w-4 h-4" />
+                      Clear search and reset
                     </button>
                   </div>
                 ) : (
-                  results.map((resultItem) => {
-                    const doc = resultItem.doctor;
-                    const why = resultItem.why || [];
-                    const distance = resultItem.distance;
-                    const isRecommended = resultItem.recommended;
-                    
-                    return (
-                      <div
-                        key={doc._id}
-                        className={`bg-white rounded-3xl border p-6 transition-all duration-300 shadow-sm hover:shadow-md ${
-                          isRecommended
-                            ? "border-blue-200 bg-gradient-to-r from-white to-blue-50/5"
-                            : "border-slate-100"
-                        }`}
-                      >
-                        {/* Header */}
-                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                          
-                          <div className="flex items-start gap-4">
-                            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 font-extrabold flex items-center justify-center text-lg flex-shrink-0 shadow-sm">
-                              {doc.name?.[0]?.toUpperCase() || "D"}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <h3 className="font-extrabold text-slate-800 text-base leading-tight">
-                                  {doc.name}
-                                </h3>
-                                {isRecommended && (
-                                  <span className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-[10px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm shadow-blue-100 uppercase tracking-wider">
-                                    Recommended
-                                  </span>
-                                )}
-                              </div>
-                              
-                              <p className="text-xs font-semibold text-slate-400 mt-1">
-                                {doc.specialization?.toUpperCase()} • {doc.hospitalName || doc.hospitalId?.name || "Partnered Hospital"}
-                              </p>
-
-                              {/* Ratings and Experience */}
-                              <div className="flex items-center gap-3 mt-2 text-xs font-medium text-slate-500">
-                                {doc.rating > 0 && (
-                                  <span className="flex items-center gap-1 bg-yellow-50 text-yellow-700 px-2 py-0.5 rounded-lg">
-                                    <Star className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />
-                                    {doc.rating.toFixed(1)}
-                                  </span>
-                                )}
-                                {doc.experienceYears > 0 && (
-                                  <span>{doc.experienceYears} Years Exp</span>
-                                )}
-                                {distance !== null && distance !== undefined && (
-                                  <span className="flex items-center gap-1 text-slate-600 bg-slate-50 px-2 py-0.5 rounded-lg font-bold">
-                                    <MapPin className="w-3 h-3 text-slate-400" />
-                                    {distance.toFixed(1)} km away
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Wait Time Display & Favorite */}
-                          <div className="flex items-start gap-3.5">
-                            <div className="text-right flex sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-2 sm:gap-0">
-                              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Live Availability</span>
-                              <div className="text-slate-800 font-extrabold text-lg mt-0.5">
-                                {doc.availabilityState === "available" ? (
-                                  <span className="text-green-600">Accepting</span>
-                                ) : doc.availabilityState === "break" ? (
-                                  <span className="text-yellow-600">On Break</span>
-                                ) : (
-                                  <span className="text-slate-400">Offline</span>
-                                )}
-                              </div>
-                            </div>
-                            {doc.hospitalId && (
-                              <button
-                                onClick={(e) => toggleFavorite(doc.hospitalId?._id || doc.hospitalId, e)}
-                                className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
-                                  favorites.includes(doc.hospitalId?._id || doc.hospitalId)
-                                    ? "bg-rose-50 border-rose-200 text-rose-600"
-                                    : "bg-slate-50 border-slate-200 text-slate-450 hover:text-slate-700 hover:bg-slate-100"
-                                }`}
-                                title="Favorite Hospital"
-                              >
-                                <Heart className={`h-4.5 w-4.5 ${favorites.includes(doc.hospitalId?._id || doc.hospitalId) ? "fill-current" : ""}`} />
-                              </button>
-                            )}
-                          </div>
-
-                        </div>
-
-                        {/* Explanations Section */}
-                        {why.length > 0 && (
-                          <div className="mt-4 flex flex-wrap gap-1.5 border-t border-slate-50 pt-3">
-                            {why.map((badge, bIdx) => (
-                              <span
-                                key={bIdx}
-                                className={`text-[10px] font-extrabold px-3 py-1 rounded-xl ${
-                                  badge.toLowerCase().includes("strong") || badge.toLowerCase().includes("matches")
-                                    ? "bg-blue-50 text-blue-700 border border-blue-100/50"
-                                    : badge.toLowerCase().includes("available") || badge.toLowerCase().includes("immediate")
-                                      ? "bg-emerald-50 text-emerald-700 border border-emerald-100/50"
-                                      : "bg-purple-50 text-purple-700 border border-purple-100/50"
-                                }`}
-                              >
-                                {badge}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Footer Book Button */}
-                        <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
-                          <span className="text-xs text-slate-400 font-medium">
-                            {doc.availabilityState !== "unavailable"
-                              ? "Online scheduling options active"
-                              : "Doctor currently unavailable"}
+                  <>
+                    {/* RECOMMENDED OPTIONS */}
+                    {results.filter(r => r.recommended).length > 0 && (
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between px-2">
+                          <h3 className="text-sm font-extrabold text-blue-950 flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                            Recommended Healthcare Options ({results.filter(r => r.recommended).length})
+                          </h3>
+                          <span className="text-[11px] font-bold text-slate-400">
+                            Highest operational alignment
                           </span>
-                          
-                          <button
-                            onClick={() => handleBookDoctor(doc)}
-                            disabled={doc.availabilityState === "unavailable"}
-                            className={`font-bold px-6 py-2.5 rounded-xl text-xs transition shadow-sm active:scale-[0.98] ${
-                              doc.availabilityState !== "unavailable"
-                                ? "bg-blue-600 hover:bg-blue-700 text-white cursor-pointer"
-                                : "bg-slate-100 text-slate-400 cursor-not-allowed"
-                            }`}
-                          >
-                            Book Appointment
-                          </button>
                         </div>
 
+                        <div className="space-y-4">
+                          {results.filter(r => r.recommended).map((resultItem) => (
+                            <SearchResultCard
+                              key={resultItem.doctorId}
+                              item={resultItem}
+                              isFavorite={favorites.includes(resultItem.hospital?._id || resultItem.doctor?.hospitalId?._id || resultItem.doctor?.hospitalId)}
+                              onToggleFavorite={toggleFavorite}
+                              onViewDetails={handleViewDetails}
+                              onBook={handleBookDoctor}
+                            />
+                          ))}
+                        </div>
                       </div>
-                    );
-                  })
+                    )}
+
+                    {/* OTHER SUITABLE OPTIONS */}
+                    {results.filter(r => !r.recommended).length > 0 && (
+                      <div className={`space-y-4 ${results.filter(r => r.recommended).length > 0 ? "mt-8 pt-6 border-t border-slate-200/70" : ""}`}>
+                        <div className="flex items-center justify-between px-2">
+                          <h3 className="text-sm font-extrabold text-slate-700 flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-slate-400" />
+                            {results.filter(r => r.recommended).length > 0 ? "Other Suitable Options" : "Available Healthcare Options"} ({results.filter(r => !r.recommended).length})
+                          </h3>
+                          <span className="text-[11px] font-bold text-slate-400">
+                            Qualified clinicians in care pathway
+                          </span>
+                        </div>
+
+                        <div className="space-y-4">
+                          {results.filter(r => !r.recommended).map((resultItem) => (
+                            <SearchResultCard
+                              key={resultItem.doctorId}
+                              item={resultItem}
+                              isFavorite={favorites.includes(resultItem.hospital?._id || resultItem.doctor?.hospitalId?._id || resultItem.doctor?.hospitalId)}
+                              onToggleFavorite={toggleFavorite}
+                              onViewDetails={handleViewDetails}
+                              onBook={handleBookDoctor}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
 
                 {/* Load More Button */}
@@ -866,9 +850,9 @@ export default function PatientSearch() {
                     <button
                       onClick={() => executeSearchRequest(query, true)}
                       disabled={loadingMore}
-                      className="bg-white hover:bg-slate-50 text-blue-600 font-bold border border-slate-200 px-6 py-3 rounded-2xl transition shadow-sm active:scale-[0.98] text-sm"
+                      className="bg-white hover:bg-slate-50 text-blue-600 font-bold border border-slate-200 px-6 py-3 rounded-2xl transition shadow-sm active:scale-[0.98] text-sm cursor-pointer"
                     >
-                      {loadingMore ? "Loading more..." : "Load More Doctors"}
+                      {loadingMore ? "Loading more..." : "Load More Options"}
                     </button>
                   </div>
                 )}
@@ -1158,6 +1142,17 @@ export default function PatientSearch() {
 
           </div>
         </div>
+      )}
+
+      {/* LEVEL 2: PROGRESSIVE DISCLOSURE DETAIL MODAL */}
+      {detailModalOpen && detailDoctorId && (
+        <HealthcareDetailView
+          doctorId={detailDoctorId}
+          coords={coords}
+          query={query}
+          onClose={() => setDetailModalOpen(false)}
+          onBook={handleBookDoctor}
+        />
       )}
     </div>
   );

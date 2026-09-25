@@ -80,24 +80,6 @@ export const RealtimeProvider = ({ children }) => {
     };
   }, []);
 
-  // Compute composite connectionState:
-  // - OFFLINE: Browser has no network OR Core API health check failed after retries.
-  // - ONLINE: Core API is healthy and reachable (and socket connected if authenticated).
-  // - DEGRADED: Core API is fully operational, but optional realtime sync socket is disconnected/reconnecting.
-  const isOnline = typeof navigator !== "undefined" ? navigator.onLine !== false : true;
-  let connectionState = "ONLINE";
-  if (!isOnline || apiHealth === "UNAVAILABLE") {
-    connectionState = "OFFLINE";
-  } else if (apiHealth === "HEALTHY") {
-    if (!token) {
-      connectionState = "ONLINE";
-    } else if (realtimeState === "LIVE") {
-      connectionState = "ONLINE";
-    } else {
-      connectionState = "DEGRADED";
-    }
-  }
-
   const getUserIdFromToken = (tokenVal) => {
     if (!tokenVal) {
       try {
@@ -135,6 +117,24 @@ export const RealtimeProvider = ({ children }) => {
     const interval = setInterval(checkAuth, 1000);
     return () => clearInterval(interval);
   }, [token, userId]);
+
+  // Compute composite connectionState:
+  // - OFFLINE: Browser has no network OR Core API health check failed after retries.
+  // - ONLINE: Core API is healthy and reachable (and socket connected if authenticated).
+  // - DEGRADED: Core API is fully operational, but optional realtime sync socket is disconnected/reconnecting.
+  const isOnline = typeof navigator !== "undefined" ? navigator.onLine !== false : true;
+  let connectionState = "ONLINE";
+  if (!isOnline || apiHealth === "UNAVAILABLE") {
+    connectionState = "OFFLINE";
+  } else if (apiHealth === "HEALTHY") {
+    if (!token) {
+      connectionState = "ONLINE";
+    } else if (realtimeState === "LIVE") {
+      connectionState = "ONLINE";
+    } else {
+      connectionState = "DEGRADED";
+    }
+  }
 
   const getStoredCommittedSeq = () => {
     const key = userId ? `realtime_last_committed_${userId}` : "";

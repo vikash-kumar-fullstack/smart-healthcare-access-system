@@ -108,6 +108,13 @@ async function run() {
       assert.deepEqual(res.body.data?.suggestions, []);
     });
 
+    // 5. Security: Detail endpoint authorization protection
+    await test("GET /api/v1/search/details/:doctorId without token returns 401 Unauthorized", async () => {
+      const res = await makeRequest(server, "GET", "/api/v1/search/details/609c12345678901234567890");
+      assert.equal(res.status, 401);
+      assert.equal(res.body.success, false);
+    });
+
   } finally {
     server.close();
     await mongoose.disconnect();
