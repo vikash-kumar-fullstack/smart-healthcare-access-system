@@ -315,6 +315,15 @@ export default function PatientSearch() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Handle ranking preference change (Balanced / Fastest / Closest)
+  const handlePreferenceChange = (newPref) => {
+    setPreference(newPref);
+    saveStateToSession({ preference: newPref });
+    if (query.trim().length >= 2) {
+      executeSearchRequest(query, false, coords, newPref);
+    }
+  };
+
   // 4. Core Search Execution
   const executeSearchRequest = async (
     searchQuery,
@@ -399,13 +408,6 @@ export default function PatientSearch() {
     }
   };
 
-  const handlePreferenceChange = (newPref) => {
-    setPreference(newPref);
-    if (query.trim().length >= 2) {
-      executeSearchRequest(query, false, coords, newPref);
-    }
-  };
-
   const handleViewDetails = (docId) => {
     setDetailDoctorId(docId);
     setDetailModalOpen(true);
@@ -467,7 +469,7 @@ export default function PatientSearch() {
       return;
     }
 
-    const hospId = doc.hospitalId?._id || doc.hospitalId;
+    const hospId = doc.hospitalId?._id || doc.hospitalId || doc.hospital?._id;
     navigate(`/patient/book?doctorId=${doc._id}&hospitalId=${hospId}`);
   };
 
@@ -733,8 +735,8 @@ export default function PatientSearch() {
                   <h2 className="text-xl font-black text-slate-800 tracking-tight">
                     Healthcare Options
                   </h2>
-                  <span className="text-xs text-slate-400 font-semibold bg-slate-100 px-3 py-1 rounded-full">
-                    Mode: {mode.toUpperCase()}
+                  <span className="text-xs text-slate-500 font-semibold bg-slate-100 px-3 py-1 rounded-full">
+                    {results.length} {results.length === 1 ? "option" : "options"} found
                   </span>
                 </div>
               )}
@@ -750,13 +752,17 @@ export default function PatientSearch() {
                 ) : hasSearched && results.length === 0 ? (
                   <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-10 text-center max-w-lg mx-auto">
                     <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-3xl flex items-center justify-center mx-auto text-2xl mb-4 shadow-xs">
-                      🧭
+                      {mode === "unknown_query" ? "❓" : "🧭"}
                     </div>
                     <h3 className="text-lg font-black text-slate-900">
-                      No Matching Clinicians Available Right Now
+                      {mode === "unknown_query"
+                        ? "Search could not be confidently mapped to a healthcare specialty."
+                        : "No Matching Clinicians Available Right Now"}
                     </h3>
                     <p className="text-slate-500 text-xs mt-2 leading-relaxed max-w-md mx-auto">
-                      We could not identify active specialists taking walk-in patients for "{query}". You can refine your search or explore common care pathways below.
+                      {mode === "unknown_query"
+                        ? `We could not recognize "${query}" as a clinical symptom, doctor, specialty, or hospital. Please refine your query using descriptive medical symptoms or provider names.`
+                        : `We could not identify active specialists taking walk-in patients for "${query}". You can refine your search or explore common care pathways below.`}
                     </p>
 
                     <div className="mt-6 pt-5 border-t border-slate-100">
@@ -1152,6 +1158,7 @@ export default function PatientSearch() {
           query={query}
           onClose={() => setDetailModalOpen(false)}
           onBook={handleBookDoctor}
+          onRequestLocation={requestLocation}
         />
       )}
     </div>

@@ -133,10 +133,11 @@ async function runConcern1Tests() {
     assert.ok(res.results.length > 0, "Should find doctor Alok");
   });
 
-  await test("Unknown symptom falls back gracefully to General Medicine without 500", async () => {
+  await test("Unrecognized query safely returns unknown_query mode without 500 or false specialty match", async () => {
     const res = await executeSearch(null, "unrecognizedsymptomqueryxyz", null, null, null, 10);
     assert.ok(res.results !== undefined, "Results must be defined");
-    assert.ok(res.mode === "normal" || res.mode === "fallback" || res.mode === "degraded");
+    assert.equal(res.mode, "unknown_query", "Unrecognized query must safely enter unknown_query mode");
+    assert.equal(res.results.length, 0, "Unrecognized query must not fabricate doctor matches");
   });
 
   // --- PART D: Result Bounds and Pagination Limits ---

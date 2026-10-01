@@ -7,8 +7,8 @@ export const normalizeQuery = (q) => {
   return q
     .toLowerCase()
     .trim()
-    .replace(/[&+/]/g, " ") // replace &, +, / with space so "fever & cough" -> "fever cough"
-    .replace(/[^\w\s-]/g, "") // remove other special characters except spaces/hyphens
+    .replace(/[-&+/]/g, " ") // replace -, &, +, / with space
+    .replace(/[^\w\s]/g, "") // remove other special characters
     .replace(/\s+/g, " "); // collapse multiple spaces to single
 };
 
@@ -171,35 +171,8 @@ export const findMatchingSymptom = async (normalized) => {
 };
 
 // Explicit reviewable emergency triggers (NOT automated AI inference)
-const ACUTE_EMERGENCY_TRIGGERS = [
-  "chest pain",
-  "heart attack",
-  "angina",
-  "difficulty breathing",
-  "shortness of breath",
-  "breathless",
-  "severe bleeding",
-  "unconscious",
-  "fainting",
-  "stroke",
-  "paralysis",
-  "seizure",
-  "choking"
-];
-
-// Related clinical specialties mapping for transparent care navigation
-const RELATED_SPECIALTY_MAP = {
-  "neurology": ["General Medicine", "Psychiatry"],
-  "gastroenterology": ["General Medicine"],
-  "cardiology": ["General Medicine", "Emergency Care"],
-  "dermatology": ["General Medicine", "Allergy & Immunology"],
-  "orthopedics": ["General Medicine", "Physical Therapy"],
-  "ophthalmology": ["General Medicine", "ENT"],
-  "ent": ["General Medicine", "Pediatrics"],
-  "pulmonology": ["General Medicine", "Cardiology"],
-  "pediatrics": ["General Medicine"],
-  "general medicine": ["Pediatrics", "Pulmonology", "Gastroenterology"]
-};
+export { ACUTE_EMERGENCY_TRIGGERS } from "./query_understanding.service.js";
+import { understandQuery } from "./query_understanding.service.js";
 
 /**
  * Maps patient query to healthcare care pathways, identifying relevant specialties
@@ -209,64 +182,35 @@ const RELATED_SPECIALTY_MAP = {
  * @returns {Promise<Object>}
  */
 export const getCarePathwayForQuery = async (rawQuery) => {
-  const normalized = normalizeQuery(rawQuery);
-  const symptomMatch = await findMatchingSymptom(normalized);
+  const understood = await understandQuery(rawQuery);
 
-  // 1. Check explicit acute emergency triggers
-  const isEmergency = ACUTE_EMERGENCY_TRIGGERS.some(trigger => 
-    normalized.includes(trigger)
-  );
-
-  let emergencyMessage = null;
-  if (isEmergency) {
-    emergencyMessage = "Your query includes symptoms that may require urgent medical attention. If you are experiencing acute distress, call 108 or proceed to the nearest Emergency Department immediately.";
-  }
-
-  // 2. Identify clinical care pathways
-  const primarySpecialties = [];
-  const relatedSpecialties = new Set();
-  const symptomsFound = [];
-
-  if (symptomMatch) {
-    symptomsFound.push(symptomMatch.name);
-    if (symptomMatch.specializationIds && symptomMatch.specializationIds.length > 0) {
-      for (const spec of symptomMatch.specializationIds) {
-        // Capitalize properly
-        const formattedSpec = spec
-          .split(" ")
-          .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-          .join(" ");
-        primarySpecialties.push(formattedSpec);
-
-        const related = RELATED_SPECIALTY_MAP[spec.toLowerCase()] || [];
-        related.forEach(r => relatedSpecialties.add(r));
-      }
-    }
-  }
-
-  // Fallback default if no explicit symptom matched
-  if (primarySpecialties.length === 0) {
-    primarySpecialties.push("General Medicine");
-    relatedSpecialties.add("Family Medicine");
-  }
-
-  // Remove primary specialties from related specialties to avoid duplicates
-  primarySpecialties.forEach(p => relatedSpecialties.delete(p));
-
-  const pathwayTitle = symptomsFound.length > 0
-    ? `Care Pathway for: ${symptomsFound.join(" & ")}`
-    : `Healthcare Navigation for "${rawQuery}"`;
+  const pathwayTitle = understood.matchedSymptoms && understood.matchedSymptoms.length > 0
+    ? `Care Pathway for: ${understood.matchedSymptoms.join(" & ")}`
+    : understood.isKnownHealthcareQuery
+      ? `Healthcare Navigation: ${understood.primarySpecialty || understood.candidateSpecialties?.[0] || rawQuery}`
+      : `Search: "${rawQuery}"`;
 
   return {
     query: rawQuery,
-    normalizedQuery: normalized,
-    isEmergency,
-    emergencyMessage,
-    symptoms: symptomsFound,
-    primarySpecialties,
-    relatedSpecialties: Array.from(relatedSpecialties),
+    normalizedQuery: understood.normalizedQuery,
+    queryType: understood.queryType,
+    confidence: understood.confidence,
+    confidenceScore: understood.confidenceScore,
+    matchMethod: understood.matchMethod,
+    isKnownHealthcareQuery: understood.isKnownHealthcareQuery,
+    isEmergency: understood.isEmergency,
+    emergencyMessage: understood.emergencyMessage,
+    symptoms: understood.matchedSymptoms || [],
+    primarySpecialties: understood.candidateSpecialties || [],
+    relatedSpecialties: understood.relatedSpecialties || [],
+    uncertaintyMessage: understood.uncertaintyMessage || null,
+    explanationMessage: understood.explanationMessage,
+    suggestedActions: understood.suggestedActions || [],
     pathwayTitle,
+    targetDoctorId: understood.targetDoctorId || null,
+    targetHospitalId: understood.targetHospitalId || null,
     disclaimer: "MediHospi is a healthcare access and decision-support system. It connects you to suitable clinical departments and operational doctors, and does not provide clinical diagnosis or treatment."
   };
 };
+
 

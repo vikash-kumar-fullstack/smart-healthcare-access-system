@@ -9,12 +9,13 @@ import { getOrRecomputeSnapshot, updateDoctorAvailabilitySnapshot } from "./avai
 import DoctorAvailabilitySnapshot from "./doctor_availability_snapshot.model.js";
 import Doctor from "../doctor/doctor.model.js";
 import DoctorSchedule from "../doctor/doctor_schedule.model.js";
+import AuditLog from "../queue/audit_log.model.js";
 import { calculateRankingScore } from "./ranking.service.js";
 import { evaluateRecommendation } from "./recommendation.service.js";
-import { calculateFreshness } from "./fahra.service.js";
+import { calculateFreshness, calculateNetworkReliability, CONFIDENCE_THRESHOLD_MIN } from "./fahra.service.js";
 
 // Decoupled search versioning (LOCK 25)
-let SEARCH_ENGINE_VERSION = 1;
+let SEARCH_ENGINE_VERSION = 2;
 export const getSearchEngineVersion = () => SEARCH_ENGINE_VERSION;
 export const setSearchEngineVersion = (v) => { SEARCH_ENGINE_VERSION = v; };
 
@@ -50,7 +51,7 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
       cached.cacheContext.availabilityVersion === globalVersions.availabilityVersion &&
       cached.cacheContext.searchEngineVersion === SEARCH_ENGINE_VERSION;
 
-    if (isFresh) {
+    if (isFresh && process.env.SEARCH_DEGRADED_MODE !== "true" && !process.env.SEARCH_DEGRADED_CANDIDATE_THRESHOLD) {
       const latency = Date.now() - startTime;
 
       // Enqueue Outbox event for cache hit
@@ -98,34 +99,87 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
     }
   }
 
+  // Stage 1: Check for Emergency Degraded Override OR Unknown / Low Confidence Query
+  const isEmergencyDegraded = process.env.SEARCH_DEGRADED_MODE === "true";
+  if (!isEmergencyDegraded && !carePathway.isKnownHealthcareQuery && carePathway.confidence === "LOW") {
+    return {
+      version: "v2",
+      mode: "unknown_query",
+      query: rawQuery,
+      normalizedQuery: normalized,
+      carePathway,
+      relevantSpecialties: [],
+      interpretedIntent: {
+        queryType: carePathway.queryType,
+        symptoms: [],
+        isEmergency: carePathway.isEmergency,
+        emergencyMessage: carePathway.emergencyMessage,
+        pathwayTitle: carePathway.pathwayTitle,
+        explanationMessage: carePathway.explanationMessage
+      },
+      metadata: {
+        preference,
+        totalCount: 0,
+        locationEnabled: !!(lat && lng),
+        freshnessState: "live",
+        queryConfidence: "LOW",
+        isKnownHealthcareQuery: false
+      },
+      recommendedOptions: [],
+      alternativeOptions: [],
+      recommendedCount: 0,
+      results: [],
+      nextCursor: null,
+      hasMore: false
+    };
+  }
+
   // ─── Query Pipeline (LOCK 3) ───
   let mode = "normal";
   let results = [];
 
   try {
-    // Stage 1: Symptom Mapping (LOCK 2, 3, 12)
-    const specKeywords = symptomMatch ? symptomMatch.specializationIds : [];
+    // Stage 2: Candidate Doctors based on Query Type
+    let candidates = [];
+    const specKeywords = carePathway.primarySpecialties || [];
+    const primarySpecs = specKeywords;
 
-    // Stage 2: Candidate Doctors (LOCK 3, 31)
-    let candidates = await getCandidateDoctors(specKeywords);
-
-    // Fallback: If no specialist doctor is found for the mapped symptom, fallback to General Medicine
-    if (candidates.length === 0 && specKeywords.length > 0) {
-      candidates = await getCandidateDoctors(["General Medicine", "General Physician"]);
+    if (carePathway.queryType === "doctor_name" && carePathway.targetDoctorId) {
+      candidates = await Doctor.find({
+        _id: carePathway.targetDoctorId,
+        status: { $in: ["active", "verified", "approved"] }
+      }).populate({ path: "hospitalId", match: { isActive: true } });
+    } else if (carePathway.queryType === "hospital_name" && carePathway.targetHospitalId) {
+      candidates = await Doctor.find({
+        hospitalId: carePathway.targetHospitalId,
+        status: { $in: ["active", "verified", "approved"] }
+      }).populate({ path: "hospitalId", match: { isActive: true } });
+    } else if (primarySpecs.length > 0) {
+      candidates = await getCandidateDoctors(primarySpecs);
+      // For symptom queries (e.g. "headache"), if 0 primary specialists are available, try clinically related departments
+      // BUT for direct specialty searches (e.g. "urology"), do NOT substitute another specialty (satisfies TEST H)
+      if (candidates.length === 0 && carePathway.queryType !== "specialty" && carePathway.relatedSpecialties?.length > 0) {
+        candidates = await getCandidateDoctors(carePathway.relatedSpecialties);
+      }
+    } else {
+      // Direct text matching against name or specialization
+      const qLower = normalizedRaw.toLowerCase();
+      candidates = await Doctor.find({
+        status: { $in: ["active", "verified", "approved"] },
+        $or: [
+          { name: new RegExp(qLower, "i") },
+          { specialization: new RegExp(qLower, "i") }
+        ]
+      }).populate({ path: "hospitalId", match: { isActive: true } }).limit(50);
     }
 
-    if (!symptomMatch) {
-      const qLower = normalizedRaw.toLowerCase();
-      candidates = candidates.filter(doc =>
-        doc.name.toLowerCase().includes(qLower) ||
-        doc.specialization.toLowerCase().includes(qLower) ||
-        (doc.hospitalId && doc.hospitalId.name && doc.hospitalId.name.toLowerCase().includes(qLower))
-      );
+    candidates = candidates.filter(c => c && c.hospitalId);
 
-      // If text search returned 0 candidates, fallback to General Medicine doctors
-      if (candidates.length === 0) {
-        candidates = await getCandidateDoctors(["General Medicine", "General Physician"]);
-      }
+    // If still 0 candidates and it is a symptom query, fallback to General Medicine for initial clinical triage
+    // Do NOT substitute General Medicine when a specific specialty was explicitly requested (satisfies TEST H)
+    if (candidates.length === 0 && carePathway.isKnownHealthcareQuery && (carePathway.queryType === "symptom" || carePathway.queryType === "multi_symptom")) {
+      candidates = await getCandidateDoctors(["General Medicine", "General Physician"]);
+      candidates = candidates.filter(c => c && c.hospitalId);
     }
 
     // Stage 3: Availability Filter (LOCK 7, 18 - Optimized for Phase 14.6)
@@ -140,10 +194,8 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
     const updatePromises = candidates.map(async (doc) => {
       let snapshot = snapshotMap.get(doc._id.toString());
       if (!snapshot) {
-        // Missing snapshot: compute synchronously once
         snapshot = await updateDoctorAvailabilitySnapshot(doc._id);
       } else if (now.getTime() - new Date(snapshot.lastComputedAt).getTime() > 120000) {
-        // Stale snapshot: run background update (do not block search response)
         updateDoctorAvailabilitySnapshot(doc._id).catch(err => 
           console.error("Background snapshot update failed:", err)
         );
@@ -158,23 +210,8 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
       }
     }
 
-    // Safety fallback: if availability filter resulted in 0 available candidates,
-    // first attempt to check if General Medicine doctors are available
-    if (filteredCandidates.length === 0 && specKeywords.length > 0) {
-      const fallbackCandidates = await getCandidateDoctors(["General Medicine", "General Physician"]);
-      const fallbackDocIds = fallbackCandidates.map(d => d._id);
-      const fallbackSnapshots = await DoctorAvailabilitySnapshot.find({ doctorId: { $in: fallbackDocIds } });
-      const fallbackMap = new Map(fallbackSnapshots.map(s => [s.doctorId.toString(), s]));
-      for (const fDoc of fallbackCandidates) {
-        let snap = fallbackMap.get(fDoc._id.toString());
-        if (snap && snap.available) {
-          filteredCandidates.push({ doctor: fDoc, snapshot: snap });
-        }
-      }
-    }
-
-    // If still 0 available candidates but candidate doctors exist for the specialty (e.g. off-duty / after-hours),
-    // include candidate doctors with their next-available slot info rather than returning an empty screen!
+    // If availability filter resulted in 0 available candidates,
+    // include candidate doctors with their next-available slot info rather than returning an empty screen
     if (filteredCandidates.length === 0 && evaluated.length > 0) {
       for (const { doc, snapshot } of evaluated) {
         filteredCandidates.push({
@@ -191,7 +228,7 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
     // - Or an actual extreme system timeout (>3500ms safety threshold) occurs
     const midTime = Date.now();
     const candidateLimit = parseInt(process.env.SEARCH_DEGRADED_CANDIDATE_THRESHOLD) || 100;
-    const isCircuitBroken = (filteredCandidates.length > candidateLimit) ||
+    const isCircuitBroken = (filteredCandidates.length >= candidateLimit) ||
       (process.env.SEARCH_DEGRADED_MODE === "true") ||
       (process.env.NODE_ENV !== "test" && (midTime - startTime > 3500));
 
@@ -262,10 +299,14 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
       results.sort((a, b) => b.fallbackScore - a.fallbackScore);
     } else {
       // Normal Mode: Multi-Signal Ranking with FA-HRA and preference profile
+      const patientCoords = (lat !== null && lat !== undefined && lng !== null && lng !== undefined && !isNaN(parseFloat(lat)) && !isNaN(parseFloat(lng)))
+        ? { lat: parseFloat(lat), lng: parseFloat(lng) }
+        : null;
+
       const rankedPromises = filteredCandidates.map(async ({ doctor, snapshot }) => {
         const ranking = await calculateRankingScore(
           doctor,
-          { lat: parseFloat(lat), lng: parseFloat(lng) },
+          patientCoords,
           specKeywords,
           snapshot.currentQueue,
           snapshot.available,
@@ -287,6 +328,7 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
           doctorId: doctor._id.toString(),
           recommended,
           why: ranking.why,
+          explanation: ranking.explanation,
           score: ranking.score,
           snapshot: ranking.snapshot,
           doctor: {
@@ -314,19 +356,58 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
               : "Next Session"
           },
           estimatedWaitMinutes: ranking.estimatedWaitMinutes || (snapshot.currentQueue * (doctor.avgConsultationTime || 5)),
+          estimatedTravelMinutes: ranking.distance !== null ? Math.max(5, Math.round((ranking.distance / 30) * 60)) : 0,
+          estimatedAccessMinutes: (ranking.estimatedWaitMinutes || (snapshot.currentQueue * (doctor.avgConsultationTime || 5))) + (ranking.distance !== null ? Math.max(5, Math.round((ranking.distance / 30) * 60)) : 0),
           currentQueue: snapshot.currentQueue || 0,
           distance: ranking.distance,
+          locationProvided: ranking.locationProvided,
           freshness: ranking.fahra?.freshness || calculateFreshness(snapshot.lastComputedAt),
-          fahraSuitability: ranking.fahra?.suitabilityScore
+          fahraSuitability: ranking.fahra?.suitabilityScore,
+          confidence: ranking.fahra?.confidence || { score: 1.0, isUncertain: false, state: "reliable" },
+          volatility: ranking.volatility || { value: 1.0, isMeasured: false }
         };
       });
 
       results = await Promise.all(rankedPromises);
-      // Sort normally by score desc, with doctorId tiebreaker
-      results.sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        return String(b.doctorId).localeCompare(String(a.doctorId));
-      });
+
+      // Audit & implement mathematically distinct ranking objectives:
+      if (preference === "closest") {
+        // CLOSEST: Primary objective = minimum geographic distance
+        results.sort((a, b) => {
+          if (a.distance !== null && b.distance !== null) {
+            const distDiff = a.distance - b.distance;
+            if (Math.abs(distDiff) > 0.001) return distDiff;
+          } else if (a.distance !== null && b.distance === null) {
+            return -1; // known distance candidate prioritized
+          } else if (a.distance === null && b.distance !== null) {
+            return 1;
+          }
+          // Secondary tiebreaker: composite score descending
+          if (b.score !== a.score) return b.score - a.score;
+          return String(b.doctorId).localeCompare(String(a.doctorId));
+        });
+      } else if (preference === "fastest") {
+        // FASTEST: Primary objective = minimum estimated access time
+        results.sort((a, b) => {
+          const accessA = a.estimatedAccessMinutes ?? a.estimatedWaitMinutes ?? 0;
+          const accessB = b.estimatedAccessMinutes ?? b.estimatedWaitMinutes ?? 0;
+          const diff = accessA - accessB;
+          if (diff !== 0) return diff;
+          // Secondary tiebreaker: composite score descending
+          if (b.score !== a.score) return b.score - a.score;
+          return String(b.doctorId).localeCompare(String(a.doctorId));
+        });
+      } else {
+        // BALANCED: Primary objective = research multi-factor score S(p,h) suitability descending
+        results.sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          // Secondary tiebreaker: minimum access time
+          const accessA = a.estimatedAccessMinutes ?? a.estimatedWaitMinutes ?? 0;
+          const accessB = b.estimatedAccessMinutes ?? b.estimatedWaitMinutes ?? 0;
+          if (accessA !== accessB) return accessA - accessB;
+          return String(b.doctorId).localeCompare(String(a.doctorId));
+        });
+      }
     }
 
   } catch (error) {
@@ -409,12 +490,20 @@ export const executeSearch = async (userId, rawQuery, lat, lng, reqCursor, reqLi
       text: item.doctor?.availabilityState === "available" ? "Accepting Patients" : "Next Session"
     },
     estimatedWaitMinutes: item.estimatedWaitMinutes || 0,
+    estimatedTravelMinutes: item.estimatedTravelMinutes !== undefined ? item.estimatedTravelMinutes : (item.distance !== null && item.distance !== undefined ? Math.max(5, Math.round((item.distance / 30) * 60)) : 0),
+    estimatedAccessMinutes: item.estimatedAccessMinutes !== undefined ? item.estimatedAccessMinutes : ((item.estimatedWaitMinutes || 0) + (item.distance !== null && item.distance !== undefined ? Math.max(5, Math.round((item.distance / 30) * 60)) : 0)),
     currentQueue: item.currentQueue || 0,
     distance: item.distance,
+    locationProvided: item.locationProvided || false,
+    explanation: item.explanation,
     freshness: item.freshness || {
-      state: "recent",
-      ageSeconds: 60,
-      displayText: "Recently updated"
+      state: "stale",
+      ageSeconds: null,
+      displayText: "Update time unavailable",
+      isUnavailable: true,
+      patientStatus: "unavailable",
+      patientLabel: "Update time unavailable",
+      patientDetailExplanation: "Update time is not available for this facility. Please contact the clinic directly to confirm availability."
     },
     fahraSuitability: item.fahraSuitability
   }));
@@ -545,15 +634,41 @@ export const getDoctorHealthcareDetails = async (doctorId, patientCoords = null,
     estimatedTravelMinutes = Math.max(5, Math.round((distanceKm / 30) * 60));
   }
 
-  // 5. Freshness calculation
-  const freshness = calculateFreshness(snapshot?.lastComputedAt);
+  // 5. Audit Log State Volatility V_h
+  let volatility = 1.0;
+  let isVolatilityMeasured = false;
+  let stateChangesCount = 0;
+  try {
+    const oneHourAgo = new Date(Date.now() - 3600 * 1000);
+    stateChangesCount = await AuditLog.countDocuments({
+      doctorId: doctor._id,
+      timestamp: { $gte: oneHourAgo }
+    });
+    if (stateChangesCount > 0) {
+      volatility = Math.max(0.5, Math.min(3.0, stateChangesCount / 10.0));
+      isVolatilityMeasured = true;
+    }
+  } catch (err) {
+    volatility = 1.0;
+    isVolatilityMeasured = false;
+  }
 
-  // 6. Operational wait time & queue
+  // 6. Freshness calculation with Volatility V_h
+  const freshness = calculateFreshness(snapshot?.lastComputedAt, { volatility, isVolatilityMeasured });
+
+  // 7. Network Reliability Telemetry N_h
+  const networkData = calculateNetworkReliability();
+
+  // 8. Overall Confidence C_h(t) = F_h(t) * N_h(t)
+  const confidenceScore = Math.round(freshness.freshness * networkData.reliability * 1000) / 1000;
+  const isUncertain = confidenceScore < CONFIDENCE_THRESHOLD_MIN;
+
+  // 9. Operational wait time & queue
   const currentQueue = snapshot?.currentQueue || 0;
   const avgConsultation = doctor.avgConsultationTime || 5;
   const estimatedWaitMinutes = currentQueue * avgConsultation;
 
-  // 7. Human-readable explainability ("Why this option?")
+  // 10. Human-readable explainability ("Why this option?")
   const why = [];
   if (rawQuery) {
     const pathway = await getCarePathwayForQuery(rawQuery);
@@ -578,38 +693,61 @@ export const getDoctorHealthcareDetails = async (doctorId, patientCoords = null,
     why.push(`Nearby healthcare facility (${distanceKm} km away)`);
   }
 
-  if (freshness.state === "live") {
-    why.push("Live operational telemetry verified");
+  if (freshness.patientStatus === "fresh" || freshness.state === "live") {
+    why.push("Information was updated recently");
+  } else if (freshness.patientStatus === "recent") {
+    why.push(`Information updated ${Math.floor((freshness.ageSeconds || 0) / 60)} min ago`);
+  }
+
+  if (isUncertain) {
+    why.push("Information may have changed — please verify before visiting");
   }
 
   if (doctor.experienceYears && doctor.experienceYears >= 5) {
     why.push(`${doctor.experienceYears}+ years clinical experience`);
   }
 
-  // 8. Suitable alternatives in the same specialization
+  // 11. Suitable alternatives in the same specialization (Audit eligibility: active hospital required)
   const alternativeDoctors = await Doctor.find({
     specialization: doctor.specialization,
     _id: { $ne: doctor._id },
     status: { $in: ["active", "approved", "verified"] }
   })
-    .populate("hospitalId")
-    .limit(3);
+    .populate({ path: "hospitalId", match: { isActive: true } })
+    .limit(6);
 
-  const altDocIds = alternativeDoctors.map(d => d._id);
+  const activeAltDocs = alternativeDoctors.filter(d => d && d.hospitalId).slice(0, 3);
+  const altDocIds = activeAltDocs.map(d => d._id);
   const altSnapshots = await DoctorAvailabilitySnapshot.find({ doctorId: { $in: altDocIds } });
   const altSnapMap = new Map(altSnapshots.map(s => [s.doctorId.toString(), s]));
 
-  const alternatives = alternativeDoctors.map(altDoc => {
+  const alternatives = activeAltDocs.map(altDoc => {
     const aSnap = altSnapMap.get(altDoc._id.toString());
     const aQueue = aSnap?.currentQueue || 0;
     const aWait = aQueue * (altDoc.avgConsultationTime || 5);
+
+    let altDist = null;
+    if (patientCoords?.lat && patientCoords?.lng && altDoc.hospitalId?.location?.coordinates) {
+      const [hLng, hLat] = altDoc.hospitalId.location.coordinates;
+      const toRad = (x) => (x * Math.PI) / 180;
+      const dLat = toRad(hLat - patientCoords.lat);
+      const dLon = toRad(hLng - patientCoords.lng);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(patientCoords.lat)) * Math.cos(toRad(hLat)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      altDist = Math.round(6371 * c * 10) / 10;
+    }
+
     return {
       doctorId: altDoc._id.toString(),
       name: altDoc.name,
       specialization: altDoc.specialization,
+      hospitalId: altDoc.hospitalId?._id?.toString(),
       hospitalName: altDoc.hospitalId?.name || "Partnered Hospital",
       available: aSnap?.available || false,
       estimatedWaitMinutes: aWait,
+      distance: altDist,
       experienceYears: altDoc.experienceYears || 0
     };
   });
@@ -619,6 +757,8 @@ export const getDoctorHealthcareDetails = async (doctorId, patientCoords = null,
       _id: doctor._id.toString(),
       name: doctor.name,
       specialization: doctor.specialization,
+      hospitalId: doctor.hospitalId?._id?.toString() || (typeof doctor.hospitalId === "string" ? doctor.hospitalId : doctor.hospitalId?.toString()) || null,
+      hospitalName: doctor.hospitalId?.name || "Partnered Hospital",
       experienceYears: doctor.experienceYears || 0,
       rating: doctor.rating || 0,
       avgConsultationTime: doctor.avgConsultationTime || 5,
@@ -651,13 +791,73 @@ export const getDoctorHealthcareDetails = async (doctorId, patientCoords = null,
       } : null
     },
     distance: distanceKm,
+    locationProvided: distanceKm !== null && distanceKm !== undefined,
     estimatedTravelMinutes,
     freshness: {
-      lastComputedAt: snapshot?.lastComputedAt || snapshot?.updatedAt || new Date(),
+      lastComputedAt: snapshot?.lastComputedAt || snapshot?.updatedAt || null,
       ageSeconds: freshness.ageSeconds,
       state: freshness.state,
       displayText: freshness.displayText,
-      reliabilityExplanation: "Live operational telemetry synced from active clinic queue sessions."
+      patientStatus: freshness.patientStatus || (freshness.state === "live" ? "fresh" : freshness.state === "recent" ? "recent" : "stale"),
+      patientLabel: freshness.patientLabel || freshness.displayText,
+      patientDetailExplanation: freshness.patientDetailExplanation || (freshness.state === "stale" ? "This information has not been updated recently. Please verify availability before visiting." : "Hospital information is current."),
+      isUnavailable: freshness.isUnavailable || false,
+      reliabilityExplanation: "Operational status synced from active clinic queue sessions."
+    },
+    volatility: {
+      value: volatility,
+      isMeasured: isVolatilityMeasured,
+      stateChangesCount,
+      description: isVolatilityMeasured
+        ? `${stateChangesCount} operational state changes observed in 1-hour window`
+        : "Standard baseline (insufficient historical event logs in 1-hour observation window)"
+    },
+    network: networkData,
+    confidence: {
+      score: confidenceScore,
+      threshold: CONFIDENCE_THRESHOLD_MIN,
+      isUncertain,
+      state: isUncertain ? "low_confidence" : "reliable",
+      message: isUncertain
+        ? `Operational telemetry confidence (${confidenceScore}) below research threshold (C_min = ${CONFIDENCE_THRESHOLD_MIN}). Operational state is uncertain.`
+        : `Operational telemetry within verified confidence threshold (C_h = ${confidenceScore}).`
+    },
+    dataConfidence: {
+      signals: {
+        available: [
+          "Specialist verified registration",
+          "Live clinic queue session",
+          "Shift operational status",
+          `Telemetry Freshness (F_h = ${freshness.freshness})`,
+          `Operational State Volatility (V_h = ${volatility.toFixed(2)}${isVolatilityMeasured ? `, ${stateChangesCount} state changes/1h` : " baseline active"})`,
+          `Network Reliability (N_h = ${networkData.reliability}, ${networkData.telemetryType})`,
+          `Composite Confidence (C_h = ${confidenceScore})`,
+          ...(distanceKm !== null ? ["Geographic Haversine distance"] : [])
+        ],
+        unavailable: [
+          ...(networkData.telemetryType === "baseline" ? ["Direct Hospital Network RTT/packet-loss hardware telemetry probe (Baseline active)"] : []),
+          ...(!isVolatilityMeasured ? ["Historical 1h State Change Audit Logs (Insufficient entries, Baseline active)"] : []),
+          ...(distanceKm === null ? ["Patient geolocation coordinates (Location not provided)"] : [])
+        ]
+      },
+      freshnessState: freshness.state,
+      volatility: {
+        value: volatility,
+        isMeasured: isVolatilityMeasured,
+        stateChangesCount
+      },
+      network: networkData,
+      confidence: {
+        score: confidenceScore,
+        threshold: CONFIDENCE_THRESHOLD_MIN,
+        isUncertain,
+        state: isUncertain ? "low_confidence" : "reliable",
+        message: isUncertain
+          ? `Operational telemetry confidence (${confidenceScore}) below research threshold (C_min = ${CONFIDENCE_THRESHOLD_MIN}). Operational state is uncertain.`
+          : `Operational telemetry within verified confidence threshold (C_h = ${confidenceScore}).`
+      },
+      isOutdated: freshness.state === "stale",
+      staleWarning: freshness.state === "stale" ? "Operational information may be outdated. Please verify before traveling." : null
     },
     why: [...new Set(why)],
     alternatives

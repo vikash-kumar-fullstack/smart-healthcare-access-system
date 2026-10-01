@@ -34,13 +34,42 @@ export default function SearchResultCard({
   const isAvailable = availability.available || doc.availabilityState === "available";
   const isOnBreak = doc.availabilityState === "break";
 
-  // Freshness badge color
-  const freshnessColor =
-    freshness.state === "live"
+  // Patient-friendly freshness styling and text
+  const freshnessStatus = freshness.patientStatus || (
+    freshness.state === "live" ? "fresh" :
+    freshness.state === "recent" ? "recent" :
+    freshness.state === "stale" ? "stale" : "unavailable"
+  );
+
+  const rawFreshText = freshness.patientLabel || freshness.displayText || "Update time unavailable";
+  const freshnessText = rawFreshText.replace(/^Live ·\s*/i, "");
+
+  const freshnessStyle =
+    freshnessStatus === "fresh"
       ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-      : freshness.state === "recent"
-        ? "text-amber-700 bg-amber-50 border-amber-200"
-        : "text-slate-600 bg-slate-100 border-slate-200";
+      : freshnessStatus === "recent"
+        ? "text-blue-700 bg-blue-50 border-blue-200"
+        : freshnessStatus === "aging"
+          ? "text-amber-800 bg-amber-50 border-amber-200"
+          : freshnessStatus === "stale"
+            ? "text-amber-900 bg-amber-50 border-amber-300"
+            : "text-slate-600 bg-slate-100 border-slate-200";
+
+  const freshnessDot =
+    freshnessStatus === "fresh"
+      ? "bg-emerald-500"
+      : freshnessStatus === "recent"
+        ? "bg-blue-500"
+        : freshnessStatus === "aging"
+          ? "bg-amber-500"
+          : freshnessStatus === "stale"
+            ? "bg-amber-600"
+            : "bg-slate-400";
+
+  // Filter out any potential internal research terms from reasons
+  const cleanWhy = why.filter(r => 
+    !/(f_h|v_h|c_h|n_h|telemetry|confidence|composite|fahra|score|s\(p|s_\{p)/i.test(r)
+  );
 
   return (
     <div
@@ -51,7 +80,7 @@ export default function SearchResultCard({
       }`}
     >
       <div className="p-6">
-        {/* Top bar: Doctor Info & Live Telemetry Badges */}
+        {/* Top bar: Doctor Info & Availability */}
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
           
           <div className="flex items-start gap-4">
@@ -90,21 +119,26 @@ export default function SearchResultCard({
                     {doc.experienceYears} yrs exp
                   </span>
                 )}
-                {distance !== null && distance !== undefined && (
+                {distance !== null && distance !== undefined ? (
                   <span className="inline-flex items-center gap-1 text-slate-700 font-bold bg-slate-100/80 px-2 py-0.5 rounded-lg">
                     <MapPin className="w-3.5 h-3.5 text-blue-500" />
-                    {distance.toFixed(1)} km
+                    {distance.toFixed(1)} km away
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-slate-400 font-medium bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-lg text-[11px]" title="Share location to view distance">
+                    <MapPin className="w-3 h-3 text-slate-400" />
+                    Distance unavailable — location not provided
                   </span>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Right side: Operational State & Favorite Button */}
+          {/* Right side: Operational Availability & Favorite Button */}
           <div className="flex items-start justify-between sm:justify-end gap-3 pt-1">
             <div className="text-left sm:text-right">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-                Live Status
+                Availability
               </span>
               <div className="mt-0.5 flex items-center gap-1.5 sm:justify-end">
                 <span
@@ -117,7 +151,7 @@ export default function SearchResultCard({
                     isAvailable ? "text-emerald-700" : isOnBreak ? "text-amber-700" : "text-slate-500"
                   }`}
                 >
-                  {isAvailable ? "Accepting Patients" : isOnBreak ? "On Break" : "Next Session"}
+                  {isAvailable ? "Available now" : isOnBreak ? "On Break" : "Next Session"}
                 </span>
               </div>
             </div>
@@ -139,14 +173,14 @@ export default function SearchResultCard({
           </div>
         </div>
 
-        {/* Middle Bar: Estimated Wait & Freshness Indicator */}
+        {/* Middle Bar: Estimated Wait & Plain-Language Freshness Indicator */}
         <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-3 flex-wrap">
             {/* Wait time */}
             <div className="flex items-center gap-1.5 text-slate-700 font-semibold bg-blue-50/60 border border-blue-100 px-3 py-1 rounded-xl">
               <Clock className="w-3.5 h-3.5 text-blue-600" />
               <span>
-                Est. Wait:{" "}
+                Est. wait:{" "}
                 <strong className="text-slate-900">
                   {currentQueue === 0 ? "~5 min (Next)" : `~${estimatedWait} min`}
                 </strong>
@@ -154,20 +188,20 @@ export default function SearchResultCard({
               <span className="text-slate-400 text-[10px]">({currentQueue} in queue)</span>
             </div>
 
-            {/* Freshness telemetry */}
-            {freshness.displayText && (
-              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[11px] font-semibold ${freshnessColor}`}>
-                <span className="w-1.5 h-1.5 rounded-full bg-current" />
-                <span>{freshness.displayText}</span>
+            {/* Freshness Indicator */}
+            {freshnessText && (
+              <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[11px] font-semibold ${freshnessStyle}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${freshnessDot}`} />
+                <span>{freshnessText}</span>
               </div>
             )}
           </div>
         </div>
 
         {/* Why this option badges (Explainability) */}
-        {why.length > 0 && (
+        {cleanWhy.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {why.slice(0, 3).map((reason, idx) => (
+            {cleanWhy.slice(0, 3).map((reason, idx) => (
               <span
                 key={idx}
                 className="text-[10px] font-bold text-slate-600 bg-slate-50 border border-slate-150 px-2.5 py-0.5 rounded-lg flex items-center gap-1"

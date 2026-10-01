@@ -1,8 +1,9 @@
+import mongoose from "mongoose";
 import Queue from "../queue/queue.model.js";
 
 export const evaluateRecommendation = async (userId, doctor, distanceKm, isSymptomMatch) => {
-  // If no logged in user, cannot match history
-  if (!userId) {
+  // If no logged in user or invalid ObjectId, cannot query history
+  if (!userId || !mongoose.isValidObjectId(userId)) {
     // Proximity fallback
     return isSymptomMatch && distanceKm !== null && distanceKm <= 5;
   }
