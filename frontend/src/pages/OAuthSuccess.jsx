@@ -1,16 +1,22 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import toast from "react-hot-toast";
 import { Loader2 } from "lucide-react";
 import { getDashboardPath } from "../utils/auth";
 
+const GOOGLE_AUTH_TOAST_ID = "google-auth-success-toast";
+
 export default function OAuthSuccess() {
   const navigate = useNavigate();
+  const hasExecutedRef = useRef(false);
 
   useEffect(() => {
+    if (hasExecutedRef.current) return;
+    hasExecutedRef.current = true;
+
     const fetchUserAndRedirect = async () => {
-      const t = toast.loading("Finalizing your sign in...");
+      toast.loading("Finalizing your sign in...", { id: GOOGLE_AUTH_TOAST_ID });
       try {
         // Retrieve profile details from backend HttpOnly session cookies
         const res = await api.get("/auth/me");
@@ -24,7 +30,7 @@ export default function OAuthSuccess() {
         localStorage.setItem("role", role);
         localStorage.setItem("user", JSON.stringify(user));
 
-        toast.success("Successfully authenticated with Google!", { id: t });
+        toast.success("Successfully authenticated with Google!", { id: GOOGLE_AUTH_TOAST_ID });
 
         if (role === "patient" && !profileCompleted) {
           navigate("/complete-profile", { replace: true });
@@ -32,7 +38,7 @@ export default function OAuthSuccess() {
           navigate(getDashboardPath(role), { replace: true });
         }
       } catch (err) {
-        toast.error("Failed to retrieve user profile.", { id: t });
+        toast.error("Failed to retrieve user profile.", { id: GOOGLE_AUTH_TOAST_ID });
         navigate("/login", { replace: true });
       }
     };

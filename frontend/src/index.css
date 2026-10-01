@@ -76,12 +76,18 @@
   --color-muted: #94a3b8;
 }
 
-html, body, #root {
-  height: 100vh;
-  max-height: 100vh;
-  overflow: hidden;
+html {
+  scroll-behavior: smooth;
+}
+
+html, body {
+  min-height: 100%;
   margin: 0;
   padding: 0;
+}
+
+#root {
+  min-height: 100vh;
 }
 
 body {
