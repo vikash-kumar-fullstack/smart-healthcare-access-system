@@ -2,6 +2,8 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import api from "../../services/api";
 import { getCachedData, setCachedData } from "../../services/apiCache";
+import { useRealtime } from "../../components/RealtimeProvider";
+import { formatTime12, formatConsultationWindow } from "../../utils/formatters";
 import toast from "react-hot-toast";
 import {
   Calendar,
@@ -14,7 +16,8 @@ import {
   ChevronRight,
   Sparkles,
   ArrowRight,
-  Heart
+  Heart,
+  Activity
 } from "lucide-react";
 
 export default function Appointments() {
@@ -73,9 +76,19 @@ export default function Appointments() {
     }
   };
 
+  const { subscribe } = useRealtime() || {};
+
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (!subscribe) return;
+    const unsub = subscribe("QUEUE_UPDATED", () => {
+      loadData();
+    });
+    return () => unsub?.();
+  }, [subscribe]);
 
   const handleCancelQueue = async () => {
     if (!window.confirm("Are you sure you want to cancel your queue booking? This action cannot be undone.")) {
@@ -300,12 +313,66 @@ export default function Appointments() {
                     </div>
                   </div>
 
+                  {/* Live Clinic Status Card (Derived estimate) */}
+                  {activeQueue.estimatedConsultationWindow ? (
+                    <div className="bg-sky-50/50 p-4.5 rounded-2xl border border-sky-150/70 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Activity className="h-4 w-4 text-[#0F4C81]" />
+                          <h5 className="text-xs font-black text-slate-800 uppercase tracking-wider">Live Clinic Status</h5>
+                        </div>
+                        {activeQueue.estimatedConsultationWindow.isPaused ? (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
+                            Doctor on break
+                          </span>
+                        ) : activeQueue.estimatedConsultationWindow.delayMinutes > 5 ? (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
+                            ~{activeQueue.estimatedConsultationWindow.delayMinutes} min behind schedule
+                          </span>
+                        ) : (
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                            On schedule
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                        <div className="bg-white p-3 rounded-xl border border-sky-100">
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Estimated Consultation</span>
+                          <span className="text-sm font-black text-[#0F4C81] mt-0.5 block">
+                            {formatConsultationWindow(activeQueue.estimatedConsultationWindow)}
+                          </span>
+                        </div>
+                        <div className="bg-white p-3 rounded-xl border border-sky-100">
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Scheduled Arrival Slot</span>
+                          <span className="text-sm font-bold text-slate-850 mt-0.5 block">
+                            {formatTime12(activeQueue.slotTime)} (Authoritative)
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className="text-[10px] text-slate-500 italic leading-relaxed pt-1">
+                        * Note: Clinic delays do not change your scheduled check-in window. Please complete check-in on time by {formatTime12(activeQueue.slotTime)} to secure your turn.
+                      </p>
+                    </div>
+                  ) : activeQueue.isToday && activeQueue.sessionStatus === "inactive" ? (
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-150/60 flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <Clock className="h-4 w-4 text-slate-400" />
+                        <span className="text-xs text-slate-600 font-bold">Clinic session has not opened yet today.</span>
+                      </div>
+                      <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-slate-200 text-slate-650">
+                        Scheduled: {formatTime12(activeQueue.slotTime)}
+                      </span>
+                    </div>
+                  ) : null}
+
                   <div className="bg-slate-50 p-4.5 rounded-2xl border border-slate-150/50 flex items-start gap-3">
                     <Calendar className="h-5 w-5 text-[#0F4C81] shrink-0 mt-0.5" />
                     <div>
                       <h5 className="text-xs font-extrabold text-slate-800">Appointment Check-in Information</h5>
                       <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
-                        Your appointment is scheduled for {activeQueue.date || "your selected date"} at {activeQueue.slotTime || "the booked time"}. Check-in will open 30 minutes before your slot time at the clinic reception desk or through your mobile portal.
+                        Your appointment is scheduled for {activeQueue.date || "your selected date"} at {formatTime12(activeQueue.slotTime) || "the booked time"}. Check-in will open 30 minutes before your slot time at the clinic reception desk or through your mobile portal.
                       </p>
                     </div>
                   </div>

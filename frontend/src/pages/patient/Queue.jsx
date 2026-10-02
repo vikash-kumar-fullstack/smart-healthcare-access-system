@@ -3,6 +3,7 @@ import api from "../../services/api";
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 import { useRealtime } from "../../components/RealtimeProvider";
+import { formatConsultationWindow } from "../../utils/formatters";
 import {
   Clock,
   User,
@@ -236,9 +237,16 @@ export default function Queue() {
             <span className="text-xs text-slate-500 font-semibold flex items-center gap-2">
               <Clock className="h-4.5 w-4.5 text-slate-450" /> Estimated Wait
             </span>
-            <span className="text-xs font-bold text-slate-850">
-              {eta ? eta : sessionStatus === "inactive" ? "Waiting for session start" : "Calculating..."}
-            </span>
+            <div className="text-right">
+              <span className="text-xs font-bold text-slate-850">
+                {eta ? eta : sessionStatus === "inactive" ? "Waiting for session start" : "Calculating..."}
+              </span>
+              {queue.estimatedConsultationWindow && (
+                <div className="text-[10px] font-bold text-[#0F4C81]">
+                  {formatConsultationWindow(queue.estimatedConsultationWindow)}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center justify-between py-2.5">
