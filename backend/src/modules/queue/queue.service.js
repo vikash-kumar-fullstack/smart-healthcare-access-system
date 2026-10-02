@@ -1569,6 +1569,114 @@ export const markPatientNoShow = async (queueId, doctorId) => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  CALCULATE ESTIMATED CONSULTATION WINDOW (Informational Dynamic Projection)
+// ═══════════════════════════════════════════════════════════════════════════════
+export const calculateEstimatedConsultationWindow = async ({
+  booking,
+  queue,
+  session,
+  nowMinutesOverride = null
+}) => {
+  if (!booking || !booking.slotTime) return null;
+
+  const todayStr = getTodayIST();
+  if (booking.date !== todayStr) {
+    return null;
+  }
+
+  const sessionStatus = session?.sessionStatus || "inactive";
+  if (!["active", "paused"].includes(sessionStatus)) {
+    return null;
+  }
+
+  const doctorId = booking.doctorId?._id || booking.doctorId;
+  const avgTime = await calculateAvgConsultationTime(doctorId);
+
+  // Determine current in-progress consultation
+  const current = await Queue.findOne({
+    doctorId,
+    sessionId: session._id,
+    status: "in_progress"
+  });
+
+  let remainingActive = 0;
+  if (current?.startedAt) {
+    const elapsed = (Date.now() - new Date(current.startedAt).getTime()) / 60000;
+    remainingActive = Math.max(0, avgTime - elapsed);
+  }
+
+  // Calculate current IST minutes from midnight
+  let nowMinutes;
+  if (typeof nowMinutesOverride === "number") {
+    nowMinutes = nowMinutesOverride;
+  } else {
+    const now = new Date();
+    const nowUtc = now.getTime() + (now.getTimezoneOffset() * 60000);
+    const istTime = new Date(nowUtc + (330 * 60000));
+    nowMinutes = istTime.getHours() * 60 + istTime.getMinutes();
+  }
+
+  const [sH, sM] = booking.slotTime.split(":").map(Number);
+  const slotMinutes = sH * 60 + sM;
+
+  let patientsAhead = 0;
+
+  if (queue && queue.isActive) {
+    patientsAhead = await Queue.countDocuments({
+      doctorId,
+      sessionId: session._id,
+      status: "waiting",
+      queueNumber: { $lt: queue.queueNumber }
+    });
+  } else {
+    const waitingInQueue = await Queue.countDocuments({
+      doctorId,
+      sessionId: session._id,
+      status: "waiting"
+    });
+
+    const priorUpcoming = await AppointmentBooking.countDocuments({
+      doctorId,
+      date: todayStr,
+      slotTime: { $lt: booking.slotTime },
+      status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT"] },
+      arrivalStatus: "NOT_ARRIVED"
+    });
+
+    patientsAhead = waitingInQueue + priorUpcoming;
+  }
+
+  // Estimated wait minutes from now until consultation start
+  const waitMinutesFromNow = Math.round(remainingActive + (patientsAhead * avgTime));
+  const projectedStartMinutes = nowMinutes + waitMinutesFromNow;
+
+  // Scheduled-time invariant for pre-check-in appointments:
+  // An upcoming patient who hasn't checked in cannot be projected before their slotTime.
+  let effectiveStartMinutes = projectedStartMinutes;
+  if (!queue || !queue.isActive) {
+    effectiveStartMinutes = Math.max(slotMinutes, projectedStartMinutes);
+  }
+
+  const delayMinutes = Math.max(0, effectiveStartMinutes - slotMinutes);
+
+  const formatMinutesToTime = (mins) => {
+    const h = Math.floor(mins / 60) % 24;
+    const m = Math.floor(mins % 60);
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  };
+
+  const start = formatMinutesToTime(effectiveStartMinutes);
+  const end = formatMinutesToTime(effectiveStartMinutes + avgTime);
+
+  return {
+    start,
+    end,
+    delayMinutes,
+    isPaused: sessionStatus === "paused"
+  };
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  GET MY QUEUE (Patient View - Omit QueueNumber, return PatientsAhead and ETA)
 // ═══════════════════════════════════════════════════════════════════════════════
 export const getMyQueue = async (userId) => {
@@ -1593,19 +1701,33 @@ export const getMyQueue = async (userId) => {
   let sessionStatus = "inactive";
   let sessionActive = false;
 
-  if (queue) {
-    const session = queue.sessionId;
-    sessionStatus = session?.sessionStatus || "inactive";
-    sessionActive = sessionStatus === "active";
+  const todayStr = getTodayIST();
+  const isToday = booking.date === todayStr;
 
+  // Resolve session (either from active queue or from booking session/date)
+  let session = queue?.sessionId;
+  if (!session && isToday) {
+    const QueueSessionModel = mongoose.model("QueueSession");
+    session = await QueueSessionModel.findOne({
+      doctorId: booking.doctorId?._id || booking.doctorId,
+      date: todayStr
+    });
+  }
+
+  if (session) {
+    sessionStatus = session.sessionStatus || "inactive";
+    sessionActive = sessionStatus === "active";
+  }
+
+  if (queue) {
     patientsAhead = await Queue.countDocuments({
       doctorId: queue.doctorId._id,
-      sessionId: session._id,
+      sessionId: session?._id || queue.sessionId?._id,
       status: "waiting",
       queueNumber: { $lt: queue.queueNumber }
     });
 
-    if (sessionActive) {
+    if (sessionActive && session) {
       const avgTime = await calculateAvgConsultationTime(queue.doctorId._id);
 
       const current = await Queue.findOne({
@@ -1634,10 +1756,21 @@ export const getMyQueue = async (userId) => {
     }
   }
 
+  // Calculate dynamic consultation window
+  let estimatedConsultationWindow = null;
+  try {
+    estimatedConsultationWindow = await calculateEstimatedConsultationWindow({
+      booking,
+      queue,
+      session
+    });
+  } catch (err) {
+    console.error("Failed to calculate estimated consultation window:", err);
+    estimatedConsultationWindow = null;
+  }
+
   const visitDoc = queue ? await Visit.findOne({ queueId: queue._id, deletedAt: null }) : null;
 
-  const todayStr = getTodayIST();
-  const isToday = booking.date === todayStr;
   const isCheckedIn = booking.arrivalStatus === "CHECKED_IN";
   const hasActiveQueue = !!queue && queue.isActive === true;
   const isLive = isToday && isCheckedIn && hasActiveQueue;
@@ -1664,7 +1797,8 @@ export const getMyQueue = async (userId) => {
     // Lifecycle enrichment
     appointmentType: isLive ? "live_queue" : "upcoming",
     isLiveQueue: isLive,
-    isUpcoming: !isLive
+    isUpcoming: !isLive,
+    estimatedConsultationWindow
   };
 };
 

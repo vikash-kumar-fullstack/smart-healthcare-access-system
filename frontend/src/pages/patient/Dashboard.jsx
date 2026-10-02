@@ -26,6 +26,8 @@ import PatientJourneyTracker from "../../components/patient/PatientJourneyTracke
 import Skeleton from "../../components/common/Skeleton";
 import EmptyState from "../../components/common/EmptyState";
 import Badge from "../../components/common/Badge";
+import { useRealtime } from "../../components/RealtimeProvider";
+import { formatConsultationWindow } from "../../utils/formatters";
 
 export default function PatientDashboard() {
   const navigate = useNavigate();
@@ -156,9 +158,19 @@ export default function PatientDashboard() {
     }
   };
 
+  const { subscribe } = useRealtime() || {};
+
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (!subscribe) return;
+    const unsub = subscribe("QUEUE_UPDATED", () => {
+      loadData();
+    });
+    return () => unsub?.();
+  }, [subscribe]);
 
   useEffect(() => {
     const handleSync = () => {
@@ -365,19 +377,27 @@ export default function PatientDashboard() {
             </div>
 
             <div className="glass-pill-container rounded-2xl p-4">
-              <span className="text-[10px] text-cyan-200 uppercase font-black tracking-wider block">Queue Number</span>
-              <span className="text-base font-extrabold text-white block mt-2 font-mono">
-                #{activeQueue.queueNumber || activeQueue.bookingNumber}
+              <span className="text-[10px] text-cyan-200 uppercase font-black tracking-wider block">
+                {activeQueue.estimatedConsultationWindow ? "Expected Consultation" : "Queue Number"}
               </span>
+              {activeQueue.estimatedConsultationWindow ? (
+                <span className="text-sm font-extrabold text-white block mt-2 font-mono">
+                  {formatConsultationWindow(activeQueue.estimatedConsultationWindow)}
+                </span>
+              ) : (
+                <span className="text-base font-extrabold text-white block mt-2 font-mono">
+                  #{activeQueue.queueNumber || activeQueue.bookingNumber}
+                </span>
+              )}
             </div>
 
             <div className="glass-pill-container rounded-2xl p-4 flex flex-col justify-between">
               <span className="text-[10px] text-cyan-200 uppercase font-black tracking-wider block">Action</span>
               <button
-                onClick={() => navigate("/patient/queue")}
+                onClick={() => navigate(activeQueue.isLiveQueue ? "/patient/queue" : "/patient/appointments")}
                 className="mt-2 text-xs font-bold text-cyan-300 hover:text-white underline text-left cursor-pointer border-none bg-transparent p-0"
               >
-                Open Live Queue Tracker →
+                {activeQueue.isLiveQueue ? "Open Live Queue Tracker →" : "View Appointment Details →"}
               </button>
             </div>
           </div>
