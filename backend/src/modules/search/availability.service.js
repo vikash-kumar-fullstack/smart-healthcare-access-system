@@ -67,12 +67,15 @@ export const updateDoctorAvailabilitySnapshot = async (doctorId) => {
   const session = await QueueSession.findOne({ doctorId, date: today });
   const sessionActive = session && ["active", "paused"].includes(session.sessionStatus);
 
-  // 3. Count waiting patients
-  const currentQueue = await Queue.countDocuments({
-    doctorId,
-    status: "waiting",
-    isActive: true
-  });
+  // 3. Count waiting patients in today's active session
+  const currentQueue = session
+    ? await Queue.countDocuments({
+        doctorId,
+        sessionId: session._id,
+        status: "waiting",
+        isActive: true
+      })
+    : 0;
 
   // 4. Evaluate availability flag
   const isSuspendedOrInactive = ["suspended", "inactive", "pending_profile", "pending_activation"].includes(doctor.status);
@@ -91,6 +94,9 @@ export const updateDoctorAvailabilitySnapshot = async (doctorId) => {
   // 5. Get next slot label
   const nextAvailable = available ? "Now" : await getNextAvailableSlot(doctorId, today);
 
+  const prevSnapshot = await DoctorAvailabilitySnapshot.findOne({ doctorId });
+  const hasStateChanged = !prevSnapshot || prevSnapshot.available !== available || prevSnapshot.currentQueue !== currentQueue;
+
   // 6. Update snapshot database document
   const snapshot = await DoctorAvailabilitySnapshot.findOneAndUpdate(
     { doctorId },
@@ -100,11 +106,13 @@ export const updateDoctorAvailabilitySnapshot = async (doctorId) => {
       nextAvailable,
       lastComputedAt: now
     },
-    { upsert: true, new: true }
+    { upsert: true, returnDocument: 'after' }
   );
 
-  // Invalidate cache by incrementing availability version
-  await incrementAvailabilityVersion();
+  // Invalidate cache only if availability state or queue depth meaningfully changed
+  if (hasStateChanged) {
+    await incrementAvailabilityVersion();
+  }
 
   return snapshot;
 };

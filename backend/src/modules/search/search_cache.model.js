@@ -42,7 +42,6 @@ const searchCacheSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-searchCacheSchema.index({ key: 1 }, { unique: true });
 searchCacheSchema.index({ createdAt: 1 }, { expireAfterSeconds: 60 });
 
 const SearchCache = mongoose.model("SearchCache", searchCacheSchema);

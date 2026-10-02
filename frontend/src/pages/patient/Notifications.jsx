@@ -21,7 +21,7 @@ export default function Notifications() {
             : [];
       setNotifications(data);
 
-      await api.patch("/notifications/read-all").catch((err) => console.error("Notifications page clear error:", err));
+      await api.patch("/notifications/read-all", {}).catch((err) => console.error("Notifications page clear error:", err));
       window.dispatchEvent(new CustomEvent("notifications-updated"));
       setNotifications(prev => prev.map(n => ({ ...n, status: "read", isRead: true })));
     } catch (err) {

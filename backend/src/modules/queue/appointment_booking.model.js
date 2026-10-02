@@ -62,6 +62,21 @@ const appointmentBookingSchema = new mongoose.Schema({
   notes: {
     type: String,
     default: ""
+  },
+  bookedByUserId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "User",
+    default: null
+  },
+  relationshipId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "FamilyRelationship",
+    default: null
+  },
+  bookedForType: {
+    type: String,
+    enum: ["SELF", "FAMILY_MEMBER"],
+    default: "SELF"
   }
 }, { timestamps: true });
 

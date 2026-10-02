@@ -71,7 +71,7 @@ export default function Landing() {
       doctors: doctorsRef,
       "queue-demo": queueDemoRef,
       "how-it-works": howItWorksRef,
-      features: featuresRef,
+      features: doctorsRef,
     };
 
     const targetRef = refs[sectionId];
@@ -258,6 +258,7 @@ export default function Landing() {
       {/* SECTION 2 — HERO */}
       <section
         ref={heroRef}
+        id="hero"
         className="relative min-h-[920px] pt-32 pb-20 flex items-center justify-center overflow-hidden bg-gradient-to-b from-[#E6FFFB]/40 via-white to-[#F8FAFC]"
       >
         {/* Soft blur backgrounds */}
@@ -463,8 +464,12 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* SECTION 3 — TRUST STRIP */}
-      <section className="bg-white py-12 border-y border-slate-200/50 shadow-sm relative overflow-hidden">
+      {/* SECTION 3 — TRUST STRIP / FIND HOSPITAL PARTNERS */}
+      <section
+        ref={findHospitalRef}
+        id="find-hospital"
+        className="bg-white py-12 border-y border-slate-200/50 shadow-sm relative overflow-hidden scroll-mt-24"
+      >
         <div className="max-w-7xl mx-auto px-6">
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 items-center min-h-[180px]">
             <StatsCard value="100+" label="Hospitals partnered" icon={HospitalIcon} />
@@ -478,7 +483,8 @@ export default function Landing() {
       {/* SECTION 4 — HOW IT WORKS (INTERACTIVE 7-STEP HEALTHCARE JOURNEY TIMELINE) */}
       <section
         ref={howItWorksRef}
-        className="py-24 bg-gradient-to-b from-[#F8FAFC] via-white to-[#F8FAFC] relative"
+        id="how-it-works"
+        className="py-24 bg-gradient-to-b from-[#F8FAFC] via-white to-[#F8FAFC] relative scroll-mt-24"
       >
         <div className="max-w-7xl mx-auto px-6 text-center">
           
@@ -813,10 +819,11 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* SECTION 5 — BENTO FEATURE GRID */}
+      {/* SECTION 5 — BENTO FEATURE GRID / DOCTORS */}
       <section
-        ref={featuresRef}
-        className="py-24 bg-white border-y border-slate-200/50"
+        ref={doctorsRef}
+        id="doctors"
+        className="py-24 bg-white border-y border-slate-200/50 scroll-mt-24"
       >
         <div className="max-w-7xl mx-auto px-6">
           
@@ -940,7 +947,8 @@ export default function Landing() {
       {/* SECTION 6 — LIVE QUEUE DEMO (REAL CLINICAL DISPLAY PANEL OVERHAUL) */}
       <section
         ref={queueDemoRef}
-        className="py-24 bg-gradient-to-b from-[#F8FAFC] via-white to-white relative overflow-hidden"
+        id="queue-demo"
+        className="py-24 bg-gradient-to-b from-[#F8FAFC] via-white to-white relative overflow-hidden scroll-mt-24"
       >
         <div className="max-w-7xl mx-auto px-6">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">

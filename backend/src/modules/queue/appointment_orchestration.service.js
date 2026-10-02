@@ -327,6 +327,12 @@ export const completeConsultation = async (bookingId, operatorId = null) => {
   booking.status = "COMPLETED";
   await booking.save();
 
+  const Queue = mongoose.model("Queue");
+  await Queue.updateMany(
+    { userId: booking.userId, sessionId: booking.sessionId, isActive: true },
+    { $set: { isActive: false, status: "completed", closedReason: "completed", completedAt: new Date() } }
+  );
+
   await logTimeline(booking._id, "doctor", operatorId, "COMPLETED");
 
   try {

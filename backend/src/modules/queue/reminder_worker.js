@@ -1,4 +1,5 @@
 import AppointmentBooking from "./appointment_booking.model.js";
+import Queue from "./queue.model.js";
 import ReminderQueue from "./reminder_queue.model.js";
 import AppointmentTimeline from "./appointment_timeline.model.js";
 import { getTodayIST } from "../search/utils.js";
@@ -81,7 +82,7 @@ const getReminderMessage = (type, slotTime) => {
 export const sweepNoShowAppointments = async () => {
   const todayStr = getTodayIST();
   const bookings = await AppointmentBooking.find({
-    date: todayStr,
+    date: { $lte: todayStr },
     arrivalStatus: "NOT_ARRIVED",
     status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT"] }
   });
@@ -90,12 +91,27 @@ export const sweepNoShowAppointments = async () => {
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
   for (const booking of bookings) {
+    const isPastDate = booking.date < todayStr;
     const slotMinutes = parseTimeToMinutes(booking.slotTime);
-    // Cutoff is 5 minutes before the slot time
-    if (currentMinutes >= slotMinutes - 5) {
+    // Cutoff is 5 minutes before the slot time on current date, or immediate if past date
+    const isPastCutoff = isPastDate || (currentMinutes >= slotMinutes - 5);
+
+    if (isPastCutoff) {
       booking.arrivalStatus = "NO_SHOW";
       booking.status = "CANCELLED";
       await booking.save();
+
+      // Synchronize associated Queue records so patient is not blocked
+      await Queue.updateMany(
+        { userId: booking.userId, sessionId: booking.sessionId, isActive: true },
+        {
+          $set: {
+            isActive: false,
+            status: "no_show",
+            closedReason: "no_show"
+          }
+        }
+      );
 
       await AppointmentTimeline.create({
         bookingId: booking._id,

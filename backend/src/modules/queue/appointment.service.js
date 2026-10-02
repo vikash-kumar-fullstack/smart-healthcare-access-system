@@ -231,6 +231,13 @@ const executeCheckIn = async (booking, method, operatorId, reason) => {
     }
   }
 
+  // Prevent patient self-service from reactivating NO_SHOW or cancelled bookings
+  if (method !== "reception") {
+    if (booking.arrivalStatus === "NO_SHOW" || booking.status === "CANCELLED") {
+      throw new Error("Check-in rejected: Appointment has been cancelled or marked as No Show. Please visit reception for assistance.");
+    }
+  }
+
   if (booking.status === "READY" || booking.arrivalStatus === "CHECKED_IN") {
     throw new Error("Booking is already checked in.");
   }
@@ -279,28 +286,63 @@ const executeCheckIn = async (booking, method, operatorId, reason) => {
   booking.checkInMethod = method;
   await booking.save();
 
-  // Update queue status upon check-in verification
+  // Create or activate live Queue entry upon verified check-in
   try {
     const QueueModel = mongoose.model("Queue");
     const QueueSessionModel = mongoose.model("QueueSession");
+    const VisitModel = mongoose.model("Visit");
 
-    const queue = await QueueModel.findOne({
+    let queue = await QueueModel.findOne({
       userId: booking.userId,
       doctorId: booking.doctorId,
       sessionId: booking.sessionId,
       isActive: true
     });
 
-    if (queue) {
-      queue.status = "waiting";
-      await queue.save();
+    if (!queue) {
+      const updatedSession = await QueueSessionModel.findByIdAndUpdate(
+        booking.sessionId,
+        { $inc: { currentQueueNumber: 1 } },
+        { returnDocument: "after" }
+      );
+      const queueNumber = updatedSession ? updatedSession.currentQueueNumber : 1;
 
-      const { triggerQueueRealtimeEvents } = await import("./queue.service.js");
-      const session = await QueueSessionModel.findById(booking.sessionId);
-      await triggerQueueRealtimeEvents(booking.doctorId, session, null, queue, "CHECK_IN");
+      queue = await QueueModel.create({
+        userId: booking.userId,
+        doctorId: booking.doctorId,
+        sessionId: booking.sessionId,
+        queueNumber,
+        status: "waiting",
+        isActive: true,
+        slotTime: booking.slotTime,
+        bookedByUserId: booking.bookedByUserId || null,
+        relationshipId: booking.relationshipId || null,
+        bookedForType: booking.bookedForType || "SELF"
+      });
+    } else {
+      queue.status = "waiting";
+      queue.isActive = true;
+      await queue.save();
     }
+
+    // Ensure corresponding Visit exists
+    let visit = await VisitModel.findOne({ queueId: queue._id, deletedAt: null });
+    if (!visit) {
+      const { createVisit } = await import("../visit/visit.service.js");
+      visit = await createVisit(
+        queue._id,
+        booking.userId,
+        booking.doctorId,
+        booking.sessionId,
+        booking.date
+      );
+    }
+
+    const { triggerQueueRealtimeEvents } = await import("./queue.service.js");
+    const session = await QueueSessionModel.findById(booking.sessionId);
+    await triggerQueueRealtimeEvents(booking.doctorId, session, null, queue, "CHECK_IN");
   } catch (err) {
-    console.error("Failed to update queue status during check-in:", err);
+    console.error("Failed to create/update queue status during check-in:", err);
   }
 
   const actor = method === "reception" ? "receptionist" : "patient";

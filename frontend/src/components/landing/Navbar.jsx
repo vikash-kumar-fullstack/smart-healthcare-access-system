@@ -31,12 +31,8 @@ export default function Navbar({
     { label: "About", sectionId: "how-it-works" },
   ];
 
-  const handleNavClick = (sectionId, label) => {
+  const handleNavClick = (sectionId) => {
     setMobileMenuOpen(false);
-    if (label === "Find Hospital" || label === "Doctors") {
-      navigate("/login");
-      return;
-    }
     if (onScrollToSection) {
       onScrollToSection(sectionId);
     }

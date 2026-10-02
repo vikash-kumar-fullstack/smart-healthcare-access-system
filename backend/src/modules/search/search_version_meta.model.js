@@ -19,7 +19,5 @@ const searchVersionMetaSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-searchVersionMetaSchema.index({ key: 1 }, { unique: true });
-
 const SearchVersionMeta = mongoose.model("SearchVersionMeta", searchVersionMetaSchema);
 export default SearchVersionMeta;

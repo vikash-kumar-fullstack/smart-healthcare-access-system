@@ -1,20 +1,26 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import toast from "react-hot-toast";
 import { Loader2 } from "lucide-react";
 import { clearSession, getDashboardPath } from "../utils/auth";
 
+const GOOGLE_AUTH_TOAST_ID = "google-auth-callback-toast";
+
 export default function OAuthCallback() {
   const navigate = useNavigate();
+  const hasExecutedRef = useRef(false);
 
   useEffect(() => {
+    if (hasExecutedRef.current) return;
+    hasExecutedRef.current = true;
+
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
     const state = params.get("state") || "google";
 
     if (!code) {
-      toast.error("OAuth authorization code was not found.");
+      toast.error("OAuth authorization code was not found.", { id: GOOGLE_AUTH_TOAST_ID });
       navigate("/login", { replace: true });
       return;
     }
@@ -23,7 +29,7 @@ export default function OAuthCallback() {
       const codeVerifier = localStorage.getItem("oauth_code_verifier") || "";
       const isSignupMode = localStorage.getItem("oauth_signup_mode") === "true";
 
-      const t = toast.loading("Exchanging credentials with Google...");
+      toast.loading("Exchanging credentials with Google...", { id: GOOGLE_AUTH_TOAST_ID });
       try {
         const lowerEmail = code.toLowerCase();
         const isStaffPattern = lowerEmail.includes("doctor") || lowerEmail.includes("admin") || lowerEmail.includes("hospital") || lowerEmail.includes("receptionist");
@@ -49,7 +55,7 @@ export default function OAuthCallback() {
         localStorage.removeItem("oauth_code_verifier");
         localStorage.removeItem("oauth_signup_mode");
 
-        toast.success("Successfully authenticated with Google!", { id: t });
+        toast.success("Successfully authenticated with Google!", { id: GOOGLE_AUTH_TOAST_ID });
 
         if (role === "patient" && !profileCompleted) {
           navigate("/complete-profile", { replace: true });
@@ -57,7 +63,7 @@ export default function OAuthCallback() {
           navigate(getDashboardPath(role), { replace: true });
         }
       } catch (err) {
-        toast.error(err.response?.data?.message || "Google authentication failed.", { id: t });
+        toast.error(err.response?.data?.message || "Google authentication failed.", { id: GOOGLE_AUTH_TOAST_ID });
         navigate("/login", { replace: true });
       }
     };

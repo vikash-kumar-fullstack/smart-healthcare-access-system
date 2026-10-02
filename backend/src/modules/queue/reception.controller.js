@@ -1,6 +1,7 @@
 import * as appointmentService from "./appointment.service.js";
 import * as queueService from "./queue.service.js";
 import AppointmentBooking from "./appointment_booking.model.js";
+import Queue from "./queue.model.js";
 import Doctor from "../doctor/doctor.model.js";
 import User from "../auth/auth.model.js";
 import Receptionist from "../admin/receptionist.model.js";
@@ -247,25 +248,90 @@ export const overrideAppointment = async (req, res) => {
     if (action === "cancel") {
       booking.status = "CANCELLED";
       await booking.save();
+      await Queue.updateMany(
+        { userId: booking.userId, sessionId: booking.sessionId, isActive: true },
+        { $set: { isActive: false, status: "cancelled", cancelReason: "reception_cancelled" } }
+      );
       await appointmentService.logTimeline(booking._id, "receptionist", operatorId, "CANCELLED", "reception_desk", { reason });
       await queueService.incrementKPI(booking.hospitalId, booking.date, { totalNoShows: 0 });
     } else if (action === "noshow") {
       booking.arrivalStatus = "NO_SHOW";
       booking.status = "CANCELLED";
       await booking.save();
+      await Queue.updateMany(
+        { userId: booking.userId, sessionId: booking.sessionId, isActive: true },
+        { $set: { isActive: false, status: "no_show", closedReason: "no_show" } }
+      );
       await appointmentService.logTimeline(booking._id, "receptionist", operatorId, "NO_SHOW", "reception_desk", { reason });
       await queueService.incrementKPI(booking.hospitalId, booking.date, { totalNoShows: 1 });
       auditAction = "NO_SHOW_OVERRIDE";
+    } else if (action === "accept_late" || action === "late_arrival") {
+      const updated = await appointmentService.checkInAppointment(
+        booking.bookingNumber,
+        hospitalId,
+        "reception",
+        operatorId,
+        reason
+      );
+      await appointmentService.logTimeline(booking._id, "receptionist", operatorId, "LATE_ARRIVAL_ACCEPTED", "reception_desk", { reason });
+      auditAction = "LATE_CHECK_IN";
+      await ReceptionAudit.create({
+        hospitalId,
+        operatorId,
+        action: auditAction,
+        bookingId: booking._id,
+        reason,
+        metadata: { action, reason }
+      });
+      return res.status(200).json({ success: true, data: updated, message: "Late arrival accepted. Patient entered live queue." });
     } else if (action === "rebook") {
       if (!rebookDate || !rebookSlot) {
         return res.status(400).json({ success: false, message: "Rebooking requires date and slot time." });
       }
-      booking.date = rebookDate;
-      booking.slotTime = rebookSlot;
-      booking.status = "BOOKED";
-      booking.arrivalStatus = "NOT_ARRIVED";
+      // 1. Cancel/close old lifecycle correctly
+      booking.status = "CANCELLED";
       await booking.save();
-      await appointmentService.logTimeline(booking._id, "receptionist", operatorId, "REBOOKED", "reception_desk", { reason, date: rebookDate, slot: rebookSlot });
+      await Queue.updateMany(
+        { userId: booking.userId, sessionId: booking.sessionId, isActive: true },
+        { $set: { isActive: false, status: "cancelled", cancelReason: "rebooked" } }
+      );
+      await appointmentService.logTimeline(booking._id, "receptionist", operatorId, "REBOOKED_CANCEL", "reception_desk", { reason, rebookDate, rebookSlot });
+
+      // 2. Create new booking for target date/slot as upcoming (without active queue until check-in)
+      const newBookingResult = await queueService.executeBookQueue(
+        booking.userId,
+        booking.doctorId,
+        rebookDate,
+        rebookSlot,
+        operatorId,
+        booking.relationshipId,
+        booking.bookedForType
+      );
+
+      if (!newBookingResult.canBook) {
+        return res.status(400).json({ success: false, message: newBookingResult.reason || "Rebooking failed." });
+      }
+
+      auditAction = "TRANSFER";
+      await ReceptionAudit.create({
+        hospitalId,
+        operatorId,
+        action: auditAction,
+        bookingId: booking._id,
+        reason,
+        metadata: {
+          previousBookingId: booking._id,
+          newBookingId: newBookingResult.booking?.bookingId,
+          rebookDate,
+          rebookSlot
+        }
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: newBookingResult.booking,
+        message: "Appointment rebooked successfully as upcoming."
+      });
     } else {
       return res.status(400).json({ success: false, message: "Invalid action." });
     }

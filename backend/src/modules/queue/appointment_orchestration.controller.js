@@ -1,6 +1,7 @@
 import * as appointmentService from "./appointment.service.js";
 import * as queueService from "./queue.service.js";
 import AppointmentBooking from "./appointment_booking.model.js";
+import Queue from "./queue.model.js";
 import AppointmentTimeline from "./appointment_timeline.model.js";
 import HospitalSchedulingPolicy from "../hospital/hospital_scheduling_policy.model.js";
 import Doctor from "../doctor/doctor.model.js";
@@ -90,6 +91,10 @@ export const receptionOverride = async (req, res, next) => {
     if (action === "cancel") {
       booking.status = "CANCELLED";
       await booking.save();
+      await Queue.updateMany(
+        { userId: booking.userId, sessionId: booking.sessionId, isActive: true },
+        { $set: { isActive: false, status: "cancelled", cancelReason: "reception_cancelled" } }
+      );
       await appointmentService.logTimeline(booking._id, "receptionist", operatorId, "CANCELLED", "reception_desk", { reason });
       // Update KPIs
       await queueService.incrementKPI(booking.hospitalId, booking.date, { totalNoShows: 0 }); // seed metric doc if needed
@@ -100,6 +105,10 @@ export const receptionOverride = async (req, res, next) => {
       booking.arrivalStatus = "NO_SHOW";
       booking.status = "CANCELLED";
       await booking.save();
+      await Queue.updateMany(
+        { userId: booking.userId, sessionId: booking.sessionId, isActive: true },
+        { $set: { isActive: false, status: "no_show", closedReason: "no_show" } }
+      );
       await appointmentService.logTimeline(booking._id, "receptionist", operatorId, "NO_SHOW", "reception_desk", { reason });
       // Update KPIs
       await queueService.incrementKPI(booking.hospitalId, booking.date, { totalNoShows: 1 });
@@ -113,6 +122,10 @@ export const receptionOverride = async (req, res, next) => {
       // Rebook: cancel previous and create new
       booking.status = "CANCELLED";
       await booking.save();
+      await Queue.updateMany(
+        { userId: booking.userId, sessionId: booking.sessionId, isActive: true },
+        { $set: { isActive: false, status: "cancelled", cancelReason: "rebooked" } }
+      );
       await appointmentService.logTimeline(booking._id, "receptionist", operatorId, "REBOOKED_CANCEL", "reception_desk", { reason });
 
       const newBooking = await appointmentService.bookAppointment(booking.userId, booking.doctorId, rebookDate, rebookSlot);

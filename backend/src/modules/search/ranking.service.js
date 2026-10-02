@@ -1,5 +1,7 @@
 import DoctorAnalyticsDaily from "../doctor/doctor_analytics_daily.model.js";
 import Queue from "../queue/queue.model.js";
+import AuditLog from "../queue/audit_log.model.js";
+import { computeFahraScore } from "./fahra.service.js";
 
 // Haversine Distance helper (coordinates: [lng, lat])
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -14,7 +16,15 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   return R * c;
 };
 
-export const calculateRankingScore = async (doctor, patientCoords, symptomMatchSpecializations, currentQueue, availability) => {
+export const calculateRankingScore = async (
+  doctor,
+  patientCoords,
+  symptomMatchSpecializations,
+  currentQueue,
+  availability,
+  options = {}
+) => {
+  const { preference = "balanced", lastComputedAt = null, maxQueueLimit = 50 } = options;
   const why = [];
 
   // ── 1. Specialization Match Score (35%) ──
@@ -141,18 +151,165 @@ export const calculateRankingScore = async (doctor, patientCoords, symptomMatchS
     }
   }
 
-  // Multi-signal weighted calculation
-  const finalScore = Math.round(
-    0.35 * specScore +
-    0.20 * distScore +
-    0.20 * availScore +
-    0.15 * qScore +
-    0.10 * relScore
-  );
+  // ── 6. Hospital Operational State Volatility V_h ──
+  let volatility = 1.0;
+  let isVolatilityMeasured = false;
+  let stateChangesCount = 0;
+  try {
+    if (doctor._id) {
+      const oneHourAgo = new Date(Date.now() - 3600 * 1000);
+      stateChangesCount = await AuditLog.countDocuments({
+        doctorId: doctor._id,
+        timestamp: { $gte: oneHourAgo }
+      });
+      if (stateChangesCount > 0) {
+        // V_h = significant state changes / observation window (normalized to nominal 10 events/hour)
+        volatility = Math.max(0.5, Math.min(3.0, stateChangesCount / 10.0));
+        isVolatilityMeasured = true;
+      }
+    }
+  } catch (logErr) {
+    // If AuditLog is unavailable, preserve baseline
+    volatility = 1.0;
+    isVolatilityMeasured = false;
+  }
+
+  // ── 7. FA-HRA Research Allocation Evaluation ──
+  const fahra = computeFahraScore({
+    estimatedWaitMinutes: estWait,
+    distanceKm,
+    currentQueue,
+    maxQueueLimit: doctor.defaultQueueLimit || maxQueueLimit,
+    lastComputedAt,
+    volatility,
+    isVolatilityMeasured,
+    preference
+  });
+
+  const structuredFactors = [];
+
+  // Specialty factor
+  if (specScore >= 80) {
+    structuredFactors.push({ factor: "specialty", label: `Matches ${doctor.specialization}`, positive: true });
+    why.push(`Specialist in ${doctor.specialization}`);
+  } else if (specScore >= 40) {
+    structuredFactors.push({ factor: "specialty", label: `Related specialty (${doctor.specialization})`, positive: true });
+    why.push("Related clinical department");
+  }
+
+  // Availability factor
+  if (availability && doctor.availabilityState === "available") {
+    structuredFactors.push({ factor: "availability", label: "Currently accepting walk-ins", positive: true });
+    why.push("Available today");
+  } else if (availability && doctor.availabilityState === "break") {
+    structuredFactors.push({ factor: "availability", label: "On clinic break - resuming shortly", positive: false });
+  }
+
+  // Waiting time factor
+  if (estWait <= 15) {
+    structuredFactors.push({ factor: "waitTime", label: `Estimated wait: ~${estWait} min`, positive: true });
+    why.push(`Short wait (~${estWait} min)`);
+  } else if (estWait <= 35) {
+    structuredFactors.push({ factor: "waitTime", label: `Moderate wait: ~${estWait} min`, positive: true });
+    why.push(`~${estWait} min wait`);
+  } else {
+    structuredFactors.push({ factor: "waitTime", label: `Current wait: ~${estWait} min`, positive: false });
+  }
+
+  // Distance factor
+  if (distanceKm !== null && distanceKm !== undefined) {
+    const roundedDist = Math.round(distanceKm * 10) / 10;
+    if (distanceKm <= 5) {
+      structuredFactors.push({ factor: "distance", label: `${roundedDist} km away (Nearby)`, positive: true });
+      why.push(`${roundedDist} km away`);
+    } else {
+      structuredFactors.push({ factor: "distance", label: `${roundedDist} km away`, positive: true });
+      why.push(`${roundedDist} km away`);
+    }
+  }
+
+  // Freshness factor (plain language for patient-facing explainability)
+  if (fahra.freshness.patientStatus === "fresh" || fahra.freshness.state === "live") {
+    structuredFactors.push({ factor: "freshness", label: "Information updated recently", positive: true });
+    why.push("Updated recently");
+  } else if (fahra.freshness.patientStatus === "recent" || fahra.freshness.state === "recent") {
+    structuredFactors.push({ factor: "freshness", label: `Updated ${Math.floor((fahra.freshness.ageSeconds || 0) / 60)} min ago`, positive: true });
+    why.push(`Updated ${Math.floor((fahra.freshness.ageSeconds || 0) / 60)} min ago`);
+  } else if (fahra.freshness.patientStatus === "aging") {
+    structuredFactors.push({ factor: "freshness", label: "Information may have changed", positive: false });
+    why.push("Information may have changed");
+  } else {
+    structuredFactors.push({ factor: "freshness", label: "Information may be outdated — please verify before visiting", positive: false });
+    why.push("Information may be outdated");
+  }
+
+  // Operational verification / confidence factor
+  if (fahra.confidence.isUncertain) {
+    structuredFactors.push({
+      factor: "confidence",
+      label: "Clinic queue status may have changed — please verify before visiting",
+      positive: false
+    });
+    why.push("Please verify status before visiting");
+  } else {
+    structuredFactors.push({
+      factor: "confidence",
+      label: "Recent clinic update confirmed",
+      positive: true
+    });
+    why.push("Confirmed clinic status");
+  }
+
+  // Combined Research Score S(p,h) -> Suitability:
+  // Balances Clinical Specialty Compatibility with Mathematical Resource Allocation Suitability
+  const finalScore = Math.round(0.35 * specScore + 0.65 * fahra.suitabilityScore);
+
+  // Available vs Unavailable signals
+  const availableSignals = [
+    "Specialty Compatibility",
+    "Queue Session State",
+    "Walk-in Availability",
+    "Consultation Time",
+    `Telemetry Freshness (F_h = ${fahra.freshness.freshness})`,
+    `Composite Confidence (C_h = ${fahra.confidence.score})`
+  ];
+  const unavailableSignals = [
+    "Direct Hospital Network RTT Telemetry (Baseline used)"
+  ];
+
+  if (isVolatilityMeasured) {
+    availableSignals.push(`Operational State Volatility (V_h = ${volatility.toFixed(2)}, ${stateChangesCount} state changes/1h)`);
+  } else {
+    unavailableSignals.push("Historical State Volatility Logs (Baseline V_h = 1.0 active)");
+  }
+
+  if (distanceKm !== null && distanceKm !== undefined) {
+    availableSignals.push("Patient Geolocation Distance");
+  } else {
+    unavailableSignals.push("Patient Geolocation (Location not provided)");
+  }
 
   return {
     score: finalScore,
     why: [...new Set(why)], // deduplicate explanations
+    explanation: {
+      summary: `Recommended option based on ${preference} allocation criteria.`,
+      factors: structuredFactors,
+      scoreBreakdown: {
+        specializationScore: specScore,
+        distanceScore: distScore,
+        availabilityScore: availScore,
+        queueScore: qScore,
+        reliabilityScore: relScore,
+        fahraSuitability: fahra.suitabilityScore,
+        finalScore
+      },
+      signals: {
+        available: availableSignals,
+        unavailable: unavailableSignals
+      },
+      confidence: fahra.confidence
+    },
     snapshot: {
       specializationScore: specScore,
       distanceScore: distScore,
@@ -161,6 +318,22 @@ export const calculateRankingScore = async (doctor, patientCoords, symptomMatchS
       reliabilityScore: relScore,
       finalScore
     },
-    distance: distanceKm
+    distance: distanceKm !== null && distanceKm !== undefined ? Math.round(distanceKm * 10) / 10 : null,
+    locationProvided: distanceKm !== null && distanceKm !== undefined,
+    estimatedWaitMinutes: estWait,
+    fahra: {
+      costScore: fahra.costScore,
+      suitabilityScore: fahra.suitabilityScore,
+      freshness: fahra.freshness,
+      network: fahra.network,
+      confidence: fahra.confidence,
+      metrics: fahra.metrics,
+      preferenceUsed: preference
+    },
+    volatility: {
+      value: volatility,
+      isMeasured: isVolatilityMeasured,
+      stateChangesCount
+    }
   };
 };

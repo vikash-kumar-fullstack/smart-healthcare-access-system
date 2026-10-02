@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import SearchEvent from "./search_event.model.js";
 import SearchAnalyticsDaily from "./search_analytics_daily.model.js";
 import SearchMonitoringDaily from "./search_monitoring_daily.model.js";
@@ -5,7 +6,7 @@ import SearchOutbox from "./search_outbox.model.js";
 import SymptomDictionary from "./symptom_dictionary.model.js";
 import Doctor from "../doctor/doctor.model.js";
 import DoctorAvailabilitySnapshot from "./doctor_availability_snapshot.model.js";
-import { executeSearch } from "./search.service.js";
+import { executeSearch, getDoctorHealthcareDetails } from "./search.service.js";
 import { calculateRankingScore } from "./ranking.service.js";
 import { normalizeQuery } from "./symptom.service.js";
 import { successResponse, errorResponse } from "../../utils/apiResponse.js";
@@ -42,7 +43,7 @@ export const search = asyncHandler(async (req, res) => {
     return res.status(429).json({ success: false, message: "Too many requests. Please try again later." });
   }
 
-  const { q, lat, lng, cursor, limit } = req.query;
+  const { q, lat, lng, cursor, limit, preference } = req.query;
 
   // Lock 15 Safety Rules
   if (!q || q.trim() === "") {
@@ -65,11 +66,14 @@ export const search = asyncHandler(async (req, res) => {
     return errorResponse(res, "Repetitive input spam detected", 400);
   }
 
+  const allowedPreferences = ["balanced", "fastest", "closest"];
+  const sanitizedPreference = allowedPreferences.includes(preference) ? preference : "balanced";
+
   const userId = req.user?.userId || null;
   const parsedLat = lat ? parseFloat(lat) : null;
   const parsedLng = lng ? parseFloat(lng) : null;
 
-  const searchResult = await executeSearch(userId, trimmed, parsedLat, parsedLng, cursor, limit);
+  const searchResult = await executeSearch(userId, trimmed, parsedLat, parsedLng, cursor, limit, sanitizedPreference);
 
   // Log Search Event (LOCK 6, 16, 26)
   const expiresAt = new Date(Date.now() + 180 * 24 * 60 * 60 * 1000); // 180 days TTL
@@ -266,3 +270,25 @@ export const recordSearchAction = asyncHandler(async (req, res) => {
 
   return successResponse(res, null, "Search conversion logged");
 });
+
+// ── GET /api/v1/search/details/:doctorId (Level 2 Progressive Disclosure) ───
+export const getHealthcareDetails = asyncHandler(async (req, res) => {
+  const { doctorId } = req.params;
+  const { lat, lng, q } = req.query;
+
+  if (!doctorId || !mongoose.Types.ObjectId.isValid(doctorId)) {
+    return errorResponse(res, "Valid doctorId is required", 400);
+  }
+
+  const parsedLat = lat ? parseFloat(lat) : null;
+  const parsedLng = lng ? parseFloat(lng) : null;
+  const patientCoords = (parsedLat && parsedLng) ? { lat: parsedLat, lng: parsedLng } : null;
+
+  const details = await getDoctorHealthcareDetails(doctorId, patientCoords, q || "");
+  if (!details) {
+    return errorResponse(res, "Doctor not found or unavailable", 404);
+  }
+
+  return successResponse(res, details, "Healthcare details retrieved successfully");
+});
+
