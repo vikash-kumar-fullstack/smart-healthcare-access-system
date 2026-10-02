@@ -153,7 +153,7 @@ export default function Appointments() {
               : "border-transparent text-slate-500 hover:text-slate-850"
           }`}
         >
-          Active Tokens ({activeQueue ? 1 : 0})
+          {activeQueue?.isLiveQueue ? "Active Queue (1)" : activeQueue?.isUpcoming ? "Upcoming Appointments (1)" : "Upcoming & Queue (0)"}
         </button>
         <button
           onClick={() => setActiveTab("history")}
@@ -176,76 +176,142 @@ export default function Appointments() {
       ) : activeTab === "upcoming" ? (
         <div className="space-y-6">
           {activeQueue ? (
-            <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden">
-              <div className="bg-gradient-to-br from-[#0F4C81] to-[#14B8A6] p-6 text-white text-left relative">
-                <div className="absolute top-6 right-6 bg-white/10 px-3 py-1 rounded-lg border border-white/10 text-[10px] font-bold tracking-wider uppercase">
-                  Active Booking
-                </div>
-                <p className="text-xs text-teal-100 font-bold uppercase tracking-wider">Virtual Queue Pass</p>
-                <h3 className="text-2xl font-black mt-2 tracking-tight">
-                  {activeQueue.arrivalStatus === "CHECKED_IN" 
-                    ? `Token #${activeQueue.queueNumber || "Pending"}` 
-                    : `Booking Ref: ${activeQueue.bookingNumber || "Pending"}`}
-                </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 border-t border-white/10 pt-4 text-xs">
-                  <div>
-                    <span className="text-teal-100/70 block">Estimated Wait</span>
-                    <span className="font-extrabold text-sm">{activeQueue.estimatedWaitMins ? `~${Math.round(activeQueue.estimatedWaitMins)} min` : "Calculating..."}</span>
+            activeQueue.isLiveQueue ? (
+              /* Genuine Live Queue Card */
+              <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden">
+                <div className="bg-gradient-to-br from-[#0F4C81] to-[#14B8A6] p-6 text-white text-left relative">
+                  <div className="absolute top-6 right-6 bg-white/10 px-3 py-1 rounded-lg border border-white/10 text-[10px] font-bold tracking-wider uppercase">
+                    Live Queue Ticket
                   </div>
-                  <div>
-                    <span className="text-teal-100/70 block">Position in Line</span>
-                    <span className="font-extrabold text-sm">#{activeQueue.positionAhead !== undefined ? activeQueue.positionAhead + 1 : "Calculating..."}</span>
-                  </div>
-                  <div>
-                    <span className="text-teal-100/70 block">Session Status</span>
-                    <span className="font-extrabold text-sm capitalize">{activeQueue.sessionStatus || "Active"}</span>
-                  </div>
-                  <div>
-                    <span className="text-teal-100/70 block">Booked At</span>
-                    <span className="font-extrabold text-sm">{new Date(activeQueue.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-6 space-y-6 text-left">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-200/50 flex items-center justify-center text-[#0F4C81] font-bold shadow-sm shrink-0">
-                      <User className="h-6 w-6" />
+                  <p className="text-xs text-teal-100 font-bold uppercase tracking-wider">Virtual Queue Pass</p>
+                  <h3 className="text-2xl font-black mt-2 tracking-tight">
+                    {activeQueue.arrivalStatus === "CHECKED_IN" 
+                      ? `Token #${activeQueue.queueNumber || "Pending"}` 
+                      : `Booking Ref: ${activeQueue.bookingNumber || "Pending"}`}
+                  </h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 border-t border-white/10 pt-4 text-xs">
+                    <div>
+                      <span className="text-teal-100/70 block">Estimated Wait</span>
+                      <span className="font-extrabold text-sm">{activeQueue.estimatedWaitMins ? `~${Math.round(activeQueue.estimatedWaitMins)} min` : "Calculating..."}</span>
                     </div>
                     <div>
-                      <h4 className="text-base font-black text-slate-800">Dr. {activeQueue.doctorId?.name || activeQueue.doctorId?.userId?.name || "Consulting Practitioner"}</h4>
-                      <p className="text-xs text-slate-450 mt-0.5">{activeQueue.doctorId?.specialization || "General Medicine"} · {activeQueue.hospitalId?.name || activeQueue.doctorId?.hospitalId?.name || "Affiliated Hospital"}</p>
+                      <span className="text-teal-100/70 block">Position in Line</span>
+                      <span className="font-extrabold text-sm">#{activeQueue.positionAhead !== undefined ? activeQueue.positionAhead + 1 : "Calculating..."}</span>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <button
-                      onClick={() => navigate("/patient/queue")}
-                      className="px-4 py-2 border border-slate-200 hover:border-slate-350 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                    >
-                      Track Progress
-                    </button>
-                    <button
-                      onClick={handleCancelQueue}
-                      className="px-4 py-2 border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Cancel Spot
-                    </button>
+                    <div>
+                      <span className="text-teal-100/70 block">Session Status</span>
+                      <span className="font-extrabold text-sm capitalize">{activeQueue.sessionStatus || "Active"}</span>
+                    </div>
+                    <div>
+                      <span className="text-teal-100/70 block">Booked At</span>
+                      <span className="font-extrabold text-sm">{new Date(activeQueue.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="bg-slate-50 p-4.5 rounded-2xl border border-slate-150/50 flex items-start gap-3">
-                  <AlertCircle className="h-5 w-5 text-[#0F4C81] shrink-0 mt-0.5" />
-                  <div>
-                    <h5 className="text-xs font-extrabold text-slate-800">Check-in Instructions</h5>
-                    <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
-                      Please head to the hospital reception desk at least 10 minutes before your estimated time. Show this ticket token pass to the counter personnel for check-in validation. If you miss your turn, you will be skipped.
-                    </p>
+                <div className="p-6 space-y-6 text-left">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-200/50 flex items-center justify-center text-[#0F4C81] font-bold shadow-sm shrink-0">
+                        <User className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h4 className="text-base font-black text-slate-800">Dr. {activeQueue.doctorId?.name || activeQueue.doctorId?.userId?.name || "Consulting Practitioner"}</h4>
+                        <p className="text-xs text-slate-450 mt-0.5">{activeQueue.doctorId?.specialization || "General Medicine"} · {activeQueue.hospitalId?.name || activeQueue.doctorId?.hospitalId?.name || "Affiliated Hospital"}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        onClick={() => navigate("/patient/queue")}
+                        className="px-4 py-2 border border-slate-200 hover:border-slate-350 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                      >
+                        Track Progress
+                      </button>
+                      <button
+                        onClick={handleCancelQueue}
+                        className="px-4 py-2 border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Cancel Spot
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 p-4.5 rounded-2xl border border-slate-150/50 flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-[#0F4C81] shrink-0 mt-0.5" />
+                    <div>
+                      <h5 className="text-xs font-extrabold text-slate-800">Check-in Instructions</h5>
+                      <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
+                        Please head to the hospital reception desk at least 10 minutes before your estimated time. Show this ticket token pass to the counter personnel for check-in validation. If you miss your turn, you will be skipped.
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              /* Scheduled Upcoming Appointment Card */
+              <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden text-left">
+                <div className="bg-gradient-to-br from-[#1E293B] to-[#334155] p-6 text-white relative">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold tracking-wide uppercase bg-sky-500/20 text-sky-200 border border-sky-400/30">
+                        Upcoming Appointment
+                      </span>
+                      <h3 className="text-xl font-black mt-2 tracking-tight">
+                        {activeQueue.hospitalId?.name || activeQueue.doctorId?.hospitalId?.name || "Affiliated Medical Center"}
+                      </h3>
+                      <p className="text-xs text-slate-300 mt-1">
+                        Ref: {activeQueue.bookingNumber || "Confirmed"}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <div className="inline-flex flex-col items-end bg-white/10 px-4 py-2 rounded-2xl border border-white/10">
+                        <span className="text-[10px] uppercase tracking-wider text-slate-300 font-bold">Appointment Date</span>
+                        <span className="text-base font-black text-white">{activeQueue.date || "Scheduled Date"}</span>
+                        <span className="text-xs font-bold text-sky-200 mt-0.5">{activeQueue.slotTime || ""} Session</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-6 space-y-6">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-sky-50 border border-sky-100 flex items-center justify-center text-[#0F4C81] font-bold shadow-sm shrink-0">
+                        <User className="h-6 w-6" />
+                      </div>
+                      <div>
+                        <h4 className="text-base font-black text-slate-800">
+                          Dr. {activeQueue.doctorId?.name || "Consulting Practitioner"}
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-0.5 font-medium">
+                          {activeQueue.doctorId?.specialization || "General Medicine"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        onClick={handleCancelQueue}
+                        className="px-4 py-2 border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Cancel Appointment
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 p-4.5 rounded-2xl border border-slate-150/50 flex items-start gap-3">
+                    <Calendar className="h-5 w-5 text-[#0F4C81] shrink-0 mt-0.5" />
+                    <div>
+                      <h5 className="text-xs font-extrabold text-slate-800">Appointment Check-in Information</h5>
+                      <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
+                        Your appointment is scheduled for {activeQueue.date || "your selected date"} at {activeQueue.slotTime || "the booked time"}. Check-in will open 30 minutes before your slot time at the clinic reception desk or through your mobile portal.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
           ) : (
             <div className="bg-white rounded-3xl border border-slate-200/60 p-10 text-center text-slate-500 shadow-sm max-w-lg mx-auto mt-6">
               <div className="w-14 h-14 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-[#0F4C81] mx-auto mb-4">
@@ -273,52 +339,74 @@ export default function Appointments() {
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-4">
-              {history.map((item) => (
-                <div
-                  key={item.queueId}
-                  className="bg-white rounded-2xl border border-slate-200/60 p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:shadow-sm hover:border-slate-300/80 transition-all text-left"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-11 h-11 rounded-xl bg-slate-50 border border-slate-200/50 text-[#0F4C81] flex items-center justify-center font-bold shrink-0 shadow-sm">
-                      <Building className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className="text-sm font-black text-slate-800">
-                          {item.doctorSnapshot?.name ? `Dr. ${item.doctorSnapshot.name}` : "Clinical Practitioner"}
-                        </h4>
-                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                          item.status === "completed"
-                            ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
-                            : "bg-rose-50 text-rose-700 border border-rose-100"
-                        }`}>
-                          {item.status}
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-450 mt-1">
-                        {item.doctorSnapshot?.specialization || "General Consultant"} · {item.doctorSnapshot?.hospitalName || "Affiliated Clinic"}
-                      </p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        {formatDate(item.createdAt)}
-                      </p>
-                    </div>
-                  </div>
+              {history.map((item) => {
+                const isNoShow = item.status === "no_show" || item.outcome === "Missed appointment" || item.outcome === "No-Show";
+                const isCompleted = item.status === "completed" || item.outcome === "Completed consultation" || item.outcome === "Visited";
+                const isCancelled = item.status === "cancelled" || item.outcome === "Cancelled appointment" || item.outcome === "Cancelled";
 
-                  <div className="flex items-center gap-2 w-full sm:w-auto self-stretch sm:self-auto shrink-0">
-                    {item.visitId ? (
+                const statusLabel = isNoShow
+                  ? "Missed appointment"
+                  : isCompleted
+                    ? "Completed consultation"
+                    : isCancelled
+                      ? "Cancelled appointment"
+                      : "Missed turn";
+
+                const badgeClass = isNoShow
+                  ? "bg-rose-50 text-rose-700 border border-rose-200"
+                  : isCompleted
+                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                    : "bg-slate-100 text-slate-600 border border-slate-200";
+
+                return (
+                  <div
+                    key={item.queueId}
+                    className="bg-white rounded-2xl border border-slate-200/60 p-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 hover:shadow-sm hover:border-slate-300/80 transition-all text-left"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-11 h-11 rounded-xl bg-slate-50 border border-slate-200/50 text-[#0F4C81] flex items-center justify-center font-bold shrink-0 shadow-sm">
+                        <Building className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="text-sm font-black text-slate-800">
+                            {item.doctorName ? item.doctorName : item.doctorSnapshot?.name ? `Dr. ${item.doctorSnapshot.name}` : "Clinical Practitioner"}
+                          </h4>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${badgeClass}`}>
+                            {statusLabel}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-450 mt-1">
+                          {item.specialization || item.doctorSnapshot?.specialization || "General Consultant"} · {item.hospitalName || item.doctorSnapshot?.hospitalName || "Affiliated Clinic"}
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {formatDate(item.bookedAt || item.createdAt)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 w-full sm:w-auto self-stretch sm:self-auto shrink-0">
                       <button
-                        onClick={() => handleViewSummary(item.visitId)}
-                        className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4.5 py-2.5 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 rounded-xl text-xs font-bold text-slate-700 hover:text-slate-900 transition-all cursor-pointer"
+                        onClick={() => navigate("/patient/search")}
+                        className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 rounded-xl text-xs font-bold text-slate-700 hover:text-slate-900 transition-all cursor-pointer"
                       >
-                        <FileText className="h-4 w-4 text-[#0F4C81]" />
-                        View Prescription
+                        Book Again
                       </button>
-                    ) : (
-                      <span className="text-[10px] text-slate-400 italic px-3">No EMR Record</span>
-                    )}
+                      {item.visitId ? (
+                        <button
+                          onClick={() => handleViewSummary(item.visitId)}
+                          className="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-slate-50 border border-slate-200 hover:bg-slate-100/70 rounded-xl text-xs font-bold text-slate-700 hover:text-slate-900 transition-all cursor-pointer"
+                        >
+                          <FileText className="h-4 w-4 text-[#0F4C81]" />
+                          View Prescription
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-slate-400 italic px-2">No Prescription</span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

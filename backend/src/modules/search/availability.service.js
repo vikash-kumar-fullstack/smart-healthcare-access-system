@@ -67,12 +67,15 @@ export const updateDoctorAvailabilitySnapshot = async (doctorId) => {
   const session = await QueueSession.findOne({ doctorId, date: today });
   const sessionActive = session && ["active", "paused"].includes(session.sessionStatus);
 
-  // 3. Count waiting patients
-  const currentQueue = await Queue.countDocuments({
-    doctorId,
-    status: "waiting",
-    isActive: true
-  });
+  // 3. Count waiting patients in today's active session
+  const currentQueue = session
+    ? await Queue.countDocuments({
+        doctorId,
+        sessionId: session._id,
+        status: "waiting",
+        isActive: true
+      })
+    : 0;
 
   // 4. Evaluate availability flag
   const isSuspendedOrInactive = ["suspended", "inactive", "pending_profile", "pending_activation"].includes(doctor.status);

@@ -293,48 +293,125 @@ export const bookQueue = async (userId, doctorId, bookingDate, slotTime = null, 
   return result;
 };
 
-const executeBookQueue = async (userId, doctorId, bookingDate, slotTime = null, bookedByUserId = null, relationshipId = null, bookedForType = "SELF") => {
+export const executeBookQueue = async (userId, doctorId, bookingDate, slotTime = null, bookedByUserId = null, relationshipId = null, bookedForType = "SELF") => {
   const todayStr = getTodayIST();
   const bookingDateStr = bookingDate || todayStr;
 
   // ── 1. Prevent duplicate active booking (atomic - Lock 5 Idempotency) ───────
+  // A. Check if patient is already actively participating in a live queue
   const existing = await Queue.findOne({ userId, isActive: true });
   if (existing) {
-    if (existing.doctorId.toString() === doctorId.toString()) {
-      const session = await getOrCreateSession(doctorId, bookingDateStr, existing.slotTime);
-      if (existing.sessionId.toString() === session._id.toString()) {
-        const isRecentRetry = (Date.now() - new Date(existing.createdAt).getTime()) < 60000;
-        if (isRecentRetry) {
-          const Visit = mongoose.model("Visit");
-          const visit = await Visit.findOne({ queueId: existing._id, deletedAt: null });
-          const patientsAhead = await Queue.countDocuments({
-            doctorId: existing.doctorId,
-            sessionId: existing.sessionId,
-            status: "waiting",
-            queueNumber: { $lt: existing.queueNumber }
-          });
-          return {
-            canBook: true,
-            booking: {
-              queueId: existing._id,
-              status: existing.status,
-              isPriority: existing.isPriority,
-              patientsAhead,
-              eta: null,
-              visit
-            },
-            guidance: "Returning existing booking details (idempotent retry).",
-            message: "You already have an active booking for this doctor."
-          };
+    // Validate if the corresponding AppointmentBooking is genuinely active
+    const activeBooking = await AppointmentBooking.findOne({
+      userId,
+      sessionId: existing.sessionId,
+      status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] }
+    });
+
+    if (!activeBooking) {
+      // The Queue document is orphaned or stale (the appointment was cancelled, swept as no-show, completed, or missing)
+      const terminalBooking = await AppointmentBooking.findOne({
+        userId,
+        sessionId: existing.sessionId
+      }).sort({ updatedAt: -1 });
+
+      const resolvedStatus = terminalBooking?.arrivalStatus === "NO_SHOW"
+        ? "no_show"
+        : terminalBooking?.status === "COMPLETED"
+          ? "completed"
+          : "cancelled";
+
+      existing.isActive = false;
+      existing.status = resolvedStatus;
+      if (resolvedStatus === "no_show") {
+        existing.closedReason = "no_show";
+        existing.cancelReason = null;
+      } else if (resolvedStatus === "completed") {
+        existing.closedReason = "completed";
+        existing.cancelReason = null;
+      } else {
+        existing.closedReason = null;
+        existing.cancelReason = "patient_cancelled";
+      }
+
+      await existing.save();
+    } else {
+      if (existing.doctorId.toString() === doctorId.toString()) {
+        const session = await getOrCreateSession(doctorId, bookingDateStr, existing.slotTime);
+        const isSameSlot = !slotTime || existing.slotTime === slotTime;
+        if (existing.sessionId.toString() === session._id.toString() && isSameSlot) {
+          const isRecentRetry = (Date.now() - new Date(existing.createdAt).getTime()) < 60000;
+          if (isRecentRetry) {
+            const Visit = mongoose.model("Visit");
+            const visit = await Visit.findOne({ queueId: existing._id, deletedAt: null });
+            const patientsAhead = await Queue.countDocuments({
+              doctorId: existing.doctorId,
+              sessionId: existing.sessionId,
+              status: "waiting",
+              queueNumber: { $lt: existing.queueNumber }
+            });
+            return {
+              canBook: true,
+              booking: {
+                queueId: existing._id,
+                status: existing.status,
+                isPriority: existing.isPriority,
+                patientsAhead,
+                eta: null,
+                visit
+              },
+              guidance: "Returning existing booking details (idempotent retry).",
+              message: "You already have an active booking for this doctor."
+            };
+          }
         }
       }
+      return {
+        canBook: false,
+        code: "DUPLICATE_BOOKING",
+        reason: "You already have an active booking. Please complete or cancel it first.",
+        action: "wait"
+      };
     }
-    return {
-      canBook: false,
-      code: "DUPLICATE_BOOKING",
-      reason: "You already have an active booking. Please complete or cancel it first.",
-      action: "wait"
-    };
+  }
+
+  // B. Check if patient already has a confirmed appointment for the same doctor, date, and slot
+  if (slotTime) {
+    const existingSlotBooking = await AppointmentBooking.findOne({
+      userId,
+      doctorId,
+      date: bookingDateStr,
+      slotTime,
+      status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY"] }
+    });
+    if (existingSlotBooking) {
+      const isRecentRetry = (Date.now() - new Date(existingSlotBooking.createdAt).getTime()) < 60000;
+      if (isRecentRetry) {
+        return {
+          canBook: true,
+          booking: {
+            queueId: null,
+            bookingId: existingSlotBooking._id,
+            bookingNumber: existingSlotBooking.bookingNumber,
+            status: existingSlotBooking.status,
+            date: existingSlotBooking.date,
+            slotTime: existingSlotBooking.slotTime,
+            isPriority: false,
+            patientsAhead: 0,
+            eta: null,
+            visit: null
+          },
+          guidance: "Returning existing scheduled appointment details (idempotent retry).",
+          message: "You already have an active booking for this slot."
+        };
+      }
+      return {
+        canBook: false,
+        code: "DUPLICATE_BOOKING",
+        reason: "You already have a confirmed appointment for this slot.",
+        action: "wait"
+      };
+    }
   }
 
   // ── 2. Validate patient & check reliability / no-show limits from patient_stats ──
@@ -535,15 +612,11 @@ const executeBookQueue = async (userId, doctorId, bookingDate, slotTime = null, 
     date: bookingDateStr,
     slotTime,
     status: "CONFIRMED",
-    arrivalStatus: "NOT_ARRIVED"
+    arrivalStatus: "NOT_ARRIVED",
+    bookedByUserId,
+    relationshipId,
+    bookedForType
   });
-
-  const updatedSession = await QueueSession.findByIdAndUpdate(
-    session._id,
-    { $inc: { currentQueueNumber: 1 } },
-    { returnDocument: "after" }
-  );
-  const queueNumber = updatedSession.currentQueueNumber;
 
   // ── 9. Check Priority Credit consumption & cleanup expired credits ────────
   await BookingCredit.updateMany(
@@ -565,119 +638,42 @@ const executeBookQueue = async (userId, doctorId, bookingDate, slotTime = null, 
     await activeCredit.save();
   }
 
-  // ── 10. Create queue entry ─────────────────────────────────────────────────
-  let queue;
-  try {
-    queue = await Queue.create({
-      userId,
-      doctorId,
-      sessionId: session._id,
-      queueNumber,
-      status: "waiting",
-      isPriority,
-      slotTime,
-      bookedByUserId,
-      relationshipId,
-      bookedForType
-    });
-  } catch (err) {
-    console.error("DIAGNOSTIC: executeBookQueue database save error:", err);
-    if (err.code === 11000) {
-      return {
-        canBook: false,
-        code: "DUPLICATE_BOOKING",
-        reason: "You already have an active booking. Please complete or cancel it first.",
-        action: "wait"
-      };
-    }
-    throw err;
-  }
-
-  // Create corresponding Visit (using dynamic import to prevent circular dependency)
-  const { createVisit } = await import("../visit/visit.service.js");
-  const visit = await createVisit(
-    queue._id,
-    userId,
-    doctorId,
-    session._id,
-    bookingDateStr
-  );
-
-  // ── 10. Compute guidance & ETA based on session state (NO visible reordering) ──
-  const ss = session.sessionStatus;
-  let estimatedWaitTime = null;
-  let guidance = "";
-
-  const patientsAhead = await Queue.countDocuments({
-    doctorId,
-    sessionId: session._id,
-    status: "waiting",
-    queueNumber: { $lt: queueNumber }
-  });
-
-  if (ss === "active") {
-    const current = await Queue.findOne({
-      doctorId,
-      sessionId: session._id,
-      status: "in_progress"
-    });
-
-    let remainingTime = 0;
-    const avgTime = await calculateAvgConsultationTime(doctorId);
-    if (current?.startedAt) {
-      const elapsed = (Date.now() - new Date(current.startedAt).getTime()) / 60000;
-      remainingTime = Math.max(avgTime - elapsed, 0);
-    }
-    estimatedWaitTime = roundMins(remainingTime + patientsAhead * avgTime);
-
-    if (patientsAhead === 0) guidance = "You are next! Please proceed to the doctor.";
-    else if (patientsAhead <= 2) guidance = "Your turn is coming soon. Please be nearby.";
-    else guidance = "You can arrive closer to your estimated time.";
-
-  } else if (ss === "paused") {
-    guidance = "Doctor is on a short break. Your spot is saved — please wait nearby.";
-  } else {
-    guidance = "Session hasn't started yet. Please arrive before the session begins.";
-  }
-
-  // ── 11. Notify patient ─────────────────────────────────────────────────────
+  // ── 10. Notify patient ─────────────────────────────────────────────────────
   await createNotification(
     userId,
-    isPriority ? "Priority Booking Confirmed 🌟" : "Booking Confirmed ✅",
-    `Booking confirmed with Dr. ${doctor.name}.${isPriority ? " Priority credit applied." : ""}`,
+    isPriority ? "Priority Appointment Confirmed 🌟" : "Appointment Confirmed ✅",
+    `Appointment confirmed with Dr. ${doctor.name} on ${bookingDateStr} at ${slotTime}.${isPriority ? " Priority credit applied." : ""}`,
     "booking",
     {
-      category: "queue",
+      category: "appointment",
       eventType: "booking_confirmed",
-      aggregateType: "Queue",
-      aggregateId: queue._id,
-      metadata: { route: "/queue", entityId: queue._id.toString() }
+      aggregateType: "AppointmentBooking",
+      aggregateId: booking._id,
+      metadata: { route: "/patient/appointments", entityId: booking._id.toString() }
     }
   ).catch(() => { });
 
-  // Expose ONLY patientsAhead, eta, status to patient
+  // Expose scheduled appointment details (Queue participation begins upon check-in)
   return {
     canBook: true,
     booking: {
-      queueId: queue._id,
-      status: queue.status,
-      isPriority: queue.isPriority,
-      patientsAhead,
-      eta: estimatedWaitTime,
-      visit,
-      bookingNumber: booking.bookingNumber
+      queueId: null,
+      bookingId: booking._id,
+      status: booking.status,
+      isPriority,
+      patientsAhead: 0,
+      eta: null,
+      visit: null,
+      bookingNumber: booking.bookingNumber,
+      date: booking.date,
+      slotTime: booking.slotTime
     },
     timing: {
-      estimatedWaitTime,
-      sessionStatus: ss
+      estimatedWaitTime: null,
+      sessionStatus: session.sessionStatus
     },
-    guidance,
-    message:
-      ss === "active"
-        ? "Booking confirmed. Track your live queue status."
-        : ss === "paused"
-          ? "Booking confirmed. Doctor is on a break — expect a short delay."
-          : "Booking confirmed. ETA will show once the doctor starts the session."
+    guidance: "Your appointment is confirmed. Check in when you arrive at the clinic to enter the live queue.",
+    message: "Booking confirmed. Check-in opens 30 minutes before your slot time."
   };
 };
 
@@ -1183,6 +1179,13 @@ export const completeQueue = async (queueId, doctorId) => {
 
     await current.save({ session: mongooseSession });
 
+    // Synchronize AppointmentBooking to COMPLETED
+    await AppointmentBooking.updateMany(
+      { userId: current.userId, sessionId: current.sessionId, status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] } },
+      { $set: { status: "COMPLETED" } },
+      { session: mongooseSession }
+    );
+
     let analyticsData = null;
     if (runAnalytics) {
       const todayIST = getTodayIST();
@@ -1321,6 +1324,13 @@ export const skipQueue = async (queueId, doctorId) => {
 
     await current.save({ session: mongooseSession });
 
+    // Synchronize AppointmentBooking on skip
+    await AppointmentBooking.updateMany(
+      { userId: current.userId, sessionId: current.sessionId, status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] } },
+      { $set: { status: "CANCELLED", arrivalStatus: "NO_SHOW" } },
+      { session: mongooseSession }
+    );
+
     let analyticsData = null;
     if (runAnalytics) {
       const todayIST = getTodayIST();
@@ -1438,6 +1448,13 @@ export const markPatientNoShow = async (queueId, doctorId) => {
     }
 
     await current.save({ session: mongooseSession });
+
+    // Synchronize AppointmentBooking to NO_SHOW / CANCELLED
+    await AppointmentBooking.updateMany(
+      { userId: current.userId, sessionId: current.sessionId, status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] } },
+      { $set: { status: "CANCELLED", arrivalStatus: "NO_SHOW" } },
+      { session: mongooseSession }
+    );
 
     // Sync Visit to no_show
     const Visit = mongoose.model("Visit");
@@ -1619,14 +1636,22 @@ export const getMyQueue = async (userId) => {
 
   const visitDoc = queue ? await Visit.findOne({ queueId: queue._id, deletedAt: null }) : null;
 
+  const todayStr = getTodayIST();
+  const isToday = booking.date === todayStr;
+  const isCheckedIn = booking.arrivalStatus === "CHECKED_IN";
+  const hasActiveQueue = !!queue && queue.isActive === true;
+  const isLive = isToday && isCheckedIn && hasActiveQueue;
+
   return {
     _id: booking._id,
+    bookingId: booking._id,
     patientsAhead,
     eta,
     status: queue?.status || booking.status,
     arrivalStatus: booking.arrivalStatus,
     bookingNumber: booking.bookingNumber,
     queueNumber: queue?.queueNumber || null,
+    date: booking.date,
     slotTime: booking.slotTime || queue?.slotTime,
     doctorId: booking.doctorId,
     hospitalId: booking.hospitalId,
@@ -1634,7 +1659,12 @@ export const getMyQueue = async (userId) => {
     sessionActive,
     isNext,
     visitId: visitDoc?._id || null,
-    publicId: visitDoc?.publicId || null
+    publicId: visitDoc?.publicId || null,
+    createdAt: booking.createdAt,
+    // Lifecycle enrichment
+    appointmentType: isLive ? "live_queue" : "upcoming",
+    isLiveQueue: isLive,
+    isUpcoming: !isLive
   };
 };
 
@@ -1962,7 +1992,11 @@ export const getQueueHistory = async (userId, queryOptions = {}) => {
     totalPages = Math.ceil(total / limitNum);
     
     historyDocs = await Queue.find(query)
-      .populate("doctorId", "name specialization")
+      .populate({
+        path: "doctorId",
+        select: "name specialization hospitalId",
+        populate: { path: "hospitalId", select: "name" }
+      })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limitNum)
@@ -1970,7 +2004,11 @@ export const getQueueHistory = async (userId, queryOptions = {}) => {
       .lean();
   } else {
     historyDocs = await Queue.find(query)
-      .populate("doctorId", "name specialization")
+      .populate({
+        path: "doctorId",
+        select: "name specialization hospitalId",
+        populate: { path: "hospitalId", select: "name" }
+      })
       .sort({ createdAt: -1 })
       .maxTimeMS(5000)
       .lean();
@@ -1981,15 +2019,16 @@ export const getQueueHistory = async (userId, queryOptions = {}) => {
     const visitDoc = await VisitModel.findOne({ queueId: q._id, deletedAt: null }).maxTimeMS(2000).lean();
     const status = q.status;
     const outcomeMap = {
-      completed: "Visited",
-      cancelled: "Cancelled",
-      skipped: "Missed",
-      no_show: "No-Show"
+      completed: "Completed consultation",
+      cancelled: "Cancelled appointment",
+      skipped: "Missed turn",
+      no_show: "Missed appointment"
     };
     return {
       queueId: q._id,
       doctorName: q.doctorId?.name,
       specialization: q.doctorId?.specialization,
+      hospitalName: q.doctorId?.hospitalId?.name || "Affiliated Hospital",
       status,
       outcome: outcomeMap[status] || status,
       cancelReason: q.cancelReason || null,
@@ -2002,9 +2041,49 @@ export const getQueueHistory = async (userId, queryOptions = {}) => {
     };
   }));
 
+  // Also include terminal AppointmentBookings (for appointments cancelled/no-show before check-in)
+  const terminalBookings = await AppointmentBooking.find({
+    userId,
+    status: { $in: ["CANCELLED", "COMPLETED", "EXPIRED"] }
+  })
+    .populate({
+      path: "doctorId",
+      select: "name specialization hospitalId",
+      populate: { path: "hospitalId", select: "name" }
+    })
+    .sort({ createdAt: -1 })
+    .maxTimeMS(5000)
+    .lean();
+
+  const bookingHistoryItems = terminalBookings.map(b => {
+    const status = b.arrivalStatus === "NO_SHOW" ? "no_show" : b.status === "COMPLETED" ? "completed" : "cancelled";
+    const outcomeMap = {
+      completed: "Completed consultation",
+      cancelled: "Cancelled appointment",
+      no_show: "Missed appointment"
+    };
+    return {
+      queueId: b._id,
+      doctorName: b.doctorId?.name,
+      specialization: b.doctorId?.specialization,
+      hospitalName: b.doctorId?.hospitalId?.name || "Affiliated Hospital",
+      status,
+      outcome: outcomeMap[status] || status,
+      cancelReason: b.status === "CANCELLED" ? "Cancelled appointment" : null,
+      bookedAt: b.createdAt,
+      completedAt: b.status === "COMPLETED" ? b.updatedAt : null,
+      cancelledAt: b.status === "CANCELLED" ? b.updatedAt : null,
+      skippedAt: null,
+      visitId: null,
+      publicId: null
+    };
+  });
+
+  const combinedList = [...rawList, ...bookingHistoryItems];
+
   // Deduplicate on backend by visitId or doctorName + bookedAt timestamp
   const seenKeys = new Set();
-  const data = rawList.filter(item => {
+  const data = combinedList.filter(item => {
     const vId = item.visitId ? String(item.visitId) : null;
     const doctor = (item.doctorName || "").toLowerCase().trim();
     const bookedTime = item.bookedAt ? new Date(item.bookedAt).getTime() : "";
@@ -2030,7 +2109,7 @@ export const getQueueHistory = async (userId, queryOptions = {}) => {
   return data;
 };
 
-const triggerQueueRealtimeEvents = async (doctorId, session, currentQueueItem, nextQueueItem, actionType) => {
+export const triggerQueueRealtimeEvents = async (doctorId, session, currentQueueItem, nextQueueItem, actionType) => {
   try {
     const { dispatchToUser, dispatchToDoctor } = await import("../realtime/event_dispatcher.js");
 

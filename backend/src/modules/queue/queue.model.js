@@ -113,7 +113,7 @@ queueSchema.pre("save", async function () {
   if (!this.isNew && this.isModified()) {
     const oldStatus = this._originalStatus || this.get("status", null, { getters: false });
     if (["completed", "no_show", "cancelled"].includes(oldStatus)) {
-      throw new Error("Queue entry is immutable after completion/cancellation (Lock 1).");
+      throw new Error(`Queue entry ${this._id} is immutable after completion/cancellation (Lock 1). oldStatus=${oldStatus}, currentStatus=${this.status}, modifiedPaths=${this.modifiedPaths()}`);
     }
   }
 

@@ -160,6 +160,18 @@ export default function PatientDashboard() {
     loadData();
   }, []);
 
+  useEffect(() => {
+    const handleSync = () => {
+      api.get("/notifications/unread").then(res => {
+        if (res?.data?.success) {
+          setUnreadAlertsCount(res.data.data.unreadCount || 0);
+        }
+      }).catch(() => {});
+    };
+    window.addEventListener("notifications-updated", handleSync);
+    return () => window.removeEventListener("notifications-updated", handleSync);
+  }, []);
+
   const handleSearchSubmit = (e) => {
     e.preventDefault();
     const query = searchSymptom.trim();

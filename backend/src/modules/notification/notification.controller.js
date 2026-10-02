@@ -90,7 +90,7 @@ export const read = asyncHandler(async (req, res) => {
 // PATCH /api/v1/notifications/read-all
 export const readAll = asyncHandler(async (req, res) => {
   const userId = req.user.userId;
-  const { beforeTimestamp } = req.body;
+  const { beforeTimestamp } = req.body || {};
 
   const before = beforeTimestamp ? new Date(beforeTimestamp) : new Date();
 
