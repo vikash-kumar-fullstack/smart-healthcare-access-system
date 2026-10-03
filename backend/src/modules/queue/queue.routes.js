@@ -55,6 +55,7 @@ router.post("/book",    authMiddleware, ensureProfileCompleted, authorizeRoles("
 router.post("/checkin", authMiddleware, ensureProfileCompleted, checkIn);
 router.get("/my",       authMiddleware, ensureProfileCompleted, authorizeRoles("patient"), myQueue);
 router.get("/history",  authMiddleware, ensureProfileCompleted, authorizeRoles("patient"), history);
+router.patch("/cancel/:bookingId", authMiddleware, authorizeRoles("patient"), cancel);
 router.patch("/cancel", authMiddleware, authorizeRoles("patient"), cancel);
 router.get("/timeline/:bookingId", authMiddleware, ensureProfileCompleted, getTimelineLogs);
 router.get("/booking/:id", authMiddleware, ensureProfileCompleted, getBookingById);

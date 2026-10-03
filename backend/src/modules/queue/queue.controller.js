@@ -82,7 +82,8 @@ export const myQueue = asyncHandler(async (req, res) => {
 });
 
 export const cancel = asyncHandler(async (req, res) => {
-  const result = await cancelQueue(req.user.userId);
+  const targetBookingId = req.params.bookingId || req.body.bookingId || req.query.bookingId || null;
+  const result = await cancelQueue(req.user.userId, targetBookingId);
   return successResponse(res, result, "Booking cancelled");
 });
 

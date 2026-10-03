@@ -170,24 +170,45 @@ export const bookAppointment = async (userId, doctorId, date, slotTime) => {
  * checkInAppointment
  */
 export const checkInAppointment = async (bookingSearch, hospitalId, method = "app", operatorId = null) => {
-  const booking = await AppointmentBooking.findOne({
-    hospitalId,
-    $or: [
-      { bookingNumber: bookingSearch },
-      { userId: mongoose.isValidObjectId(bookingSearch) ? bookingSearch : new mongoose.Types.ObjectId() }
-    ]
-  }).populate("userId");
+  const isObjectId = mongoose.isValidObjectId(bookingSearch);
+  const searchFilter = [
+    { bookingNumber: bookingSearch }
+  ];
+  if (isObjectId) {
+    searchFilter.push({ _id: new mongoose.Types.ObjectId(bookingSearch) });
+  }
+
+  const query = {
+    $or: searchFilter
+  };
+  if (hospitalId) {
+    query.hospitalId = hospitalId;
+  }
+
+  let booking = await AppointmentBooking.findOne(query).populate("userId");
+
+  // Fallback for lookup by userId (targeting today's active booking)
+  if (!booking && isObjectId) {
+    const userQuery = {
+      userId: bookingSearch,
+      date: getTodayIST(),
+      status: { $nin: ["CANCELLED", "EXPIRED", "COMPLETED"] }
+    };
+    if (hospitalId) userQuery.hospitalId = hospitalId;
+    booking = await AppointmentBooking.findOne(userQuery).sort({ slotTime: 1 }).populate("userId");
+  }
 
   if (!booking) {
     // Attempt lookup by patient phone
     const user = await User.findOne({ phone: bookingSearch });
     if (user) {
-      const byPhone = await AppointmentBooking.findOne({
-        hospitalId,
+      const byPhoneQuery = {
         userId: user._id,
         date: getTodayIST(),
-        status: { $nin: ["CANCELLED", "EXPIRED"] }
-      });
+        status: { $nin: ["CANCELLED", "EXPIRED", "COMPLETED"] }
+      };
+      if (hospitalId) byPhoneQuery.hospitalId = hospitalId;
+      const byPhone = await AppointmentBooking.findOne(byPhoneQuery).sort({ slotTime: 1 });
       if (byPhone) return executeCheckIn(byPhone, method, operatorId);
     }
     throw new Error("No active booking found for this search parameter.");

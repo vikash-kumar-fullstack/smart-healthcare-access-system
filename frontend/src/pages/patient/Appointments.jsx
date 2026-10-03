@@ -26,7 +26,14 @@ export default function Appointments() {
   const cachedHistory = getCachedData("patient_history");
 
   const [activeTab, setActiveTab] = useState("upcoming"); // 'upcoming' or 'history'
-  const [activeQueue, setActiveQueue] = useState(cachedQueue || null);
+  const [liveQueue, setLiveQueue] = useState(() => {
+    return cachedQueue?.isLiveQueue ? cachedQueue : null;
+  });
+  const [upcomingAppointments, setUpcomingAppointments] = useState(() => {
+    if (Array.isArray(cachedQueue?.upcomingAppointments)) return cachedQueue.upcomingAppointments;
+    if (cachedQueue && !cachedQueue.isLiveQueue) return [cachedQueue];
+    return [];
+  });
   const [history, setHistory] = useState(cachedHistory || []);
   const [loading, setLoading] = useState(!cachedQueue && !cachedHistory);
 
@@ -44,10 +51,17 @@ export default function Appointments() {
       ]);
 
       if (queueRes?.data?.success && queueRes.data.data) {
-        setActiveQueue(queueRes.data.data);
-        setCachedData("patient_queue", queueRes.data.data);
+        const qData = queueRes.data.data;
+        const live = qData.liveQueue || (qData.isLiveQueue ? qData : null);
+        const upcoming = Array.isArray(qData.upcomingAppointments)
+          ? qData.upcomingAppointments
+          : (qData.isUpcoming ? [qData] : []);
+        setLiveQueue(live);
+        setUpcomingAppointments(upcoming);
+        setCachedData("patient_queue", qData);
       } else {
-        setActiveQueue(null);
+        setLiveQueue(null);
+        setUpcomingAppointments([]);
         setCachedData("patient_queue", null);
       }
 
@@ -90,18 +104,18 @@ export default function Appointments() {
     return () => unsub?.();
   }, [subscribe]);
 
-  const handleCancelQueue = async () => {
-    if (!window.confirm("Are you sure you want to cancel your queue booking? This action cannot be undone.")) {
+  const handleCancelQueue = async (bookingId = null) => {
+    if (!window.confirm("Are you sure you want to cancel this appointment? This action cannot be undone.")) {
       return;
     }
-    const loadingToast = toast.loading("Cancelling booking...");
+    const loadingToast = toast.loading("Cancelling appointment...");
     try {
-      await api.patch("/queue/cancel");
-      toast.success("Booking cancelled successfully", { id: loadingToast });
-      setActiveQueue(null);
+      const url = bookingId ? `/queue/cancel/${bookingId}` : "/queue/cancel";
+      await api.patch(url, { bookingId });
+      toast.success("Appointment cancelled successfully", { id: loadingToast });
       loadData();
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to cancel booking.", { id: loadingToast });
+      toast.error(err.response?.data?.message || "Failed to cancel appointment.", { id: loadingToast });
     }
   };
 
@@ -166,7 +180,9 @@ export default function Appointments() {
               : "border-transparent text-slate-500 hover:text-slate-850"
           }`}
         >
-          {activeQueue?.isLiveQueue ? "Active Queue (1)" : activeQueue?.isUpcoming ? "Upcoming Appointments (1)" : "Upcoming & Queue (0)"}
+          {liveQueue
+            ? `Active Queue (1) · Upcoming (${upcomingAppointments.length})`
+            : `Upcoming Appointments (${upcomingAppointments.length})`}
         </button>
         <button
           onClick={() => setActiveTab("history")}
@@ -188,198 +204,206 @@ export default function Appointments() {
         </div>
       ) : activeTab === "upcoming" ? (
         <div className="space-y-6">
-          {activeQueue ? (
-            activeQueue.isLiveQueue ? (
-              /* Genuine Live Queue Card */
-              <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden">
-                <div className="bg-gradient-to-br from-[#0F4C81] to-[#14B8A6] p-6 text-white text-left relative">
-                  <div className="absolute top-6 right-6 bg-white/10 px-3 py-1 rounded-lg border border-white/10 text-[10px] font-bold tracking-wider uppercase">
-                    Live Queue Ticket
-                  </div>
-                  <p className="text-xs text-teal-100 font-bold uppercase tracking-wider">Virtual Queue Pass</p>
-                  <h3 className="text-2xl font-black mt-2 tracking-tight">
-                    {activeQueue.arrivalStatus === "CHECKED_IN" 
-                      ? `Token #${activeQueue.queueNumber || "Pending"}` 
-                      : `Booking Ref: ${activeQueue.bookingNumber || "Pending"}`}
-                  </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 border-t border-white/10 pt-4 text-xs">
-                    <div>
-                      <span className="text-teal-100/70 block">Estimated Wait</span>
-                      <span className="font-extrabold text-sm">{activeQueue.estimatedWaitMins ? `~${Math.round(activeQueue.estimatedWaitMins)} min` : "Calculating..."}</span>
-                    </div>
-                    <div>
-                      <span className="text-teal-100/70 block">Position in Line</span>
-                      <span className="font-extrabold text-sm">#{activeQueue.positionAhead !== undefined ? activeQueue.positionAhead + 1 : "Calculating..."}</span>
-                    </div>
-                    <div>
-                      <span className="text-teal-100/70 block">Session Status</span>
-                      <span className="font-extrabold text-sm capitalize">{activeQueue.sessionStatus || "Active"}</span>
-                    </div>
-                    <div>
-                      <span className="text-teal-100/70 block">Booked At</span>
-                      <span className="font-extrabold text-sm">{new Date(activeQueue.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    </div>
-                  </div>
+          {/* Live Queue Ticket Card (if checked-in live queue exists today) */}
+          {liveQueue && (
+            <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden">
+              <div className="bg-gradient-to-br from-[#0F4C81] to-[#14B8A6] p-6 text-white text-left relative">
+                <div className="absolute top-6 right-6 bg-white/10 px-3 py-1 rounded-lg border border-white/10 text-[10px] font-bold tracking-wider uppercase">
+                  Live Queue Ticket
                 </div>
-
-                <div className="p-6 space-y-6 text-left">
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-200/50 flex items-center justify-center text-[#0F4C81] font-bold shadow-sm shrink-0">
-                        <User className="h-6 w-6" />
-                      </div>
-                      <div>
-                        <h4 className="text-base font-black text-slate-800">Dr. {activeQueue.doctorId?.name || activeQueue.doctorId?.userId?.name || "Consulting Practitioner"}</h4>
-                        <p className="text-xs text-slate-450 mt-0.5">{activeQueue.doctorId?.specialization || "General Medicine"} · {activeQueue.hospitalId?.name || activeQueue.doctorId?.hospitalId?.name || "Affiliated Hospital"}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2.5">
-                      <button
-                        onClick={() => navigate("/patient/queue")}
-                        className="px-4 py-2 border border-slate-200 hover:border-slate-350 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold transition-all cursor-pointer"
-                      >
-                        Track Progress
-                      </button>
-                      <button
-                        onClick={handleCancelQueue}
-                        className="px-4 py-2 border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        Cancel Spot
-                      </button>
-                    </div>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-teal-100 font-bold uppercase tracking-wider">Virtual Queue Pass</p>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-white/20 text-white border border-white/20">
+                    Patient: {liveQueue.relationLabel === "Self" ? "Self" : `${liveQueue.relationLabel} (${liveQueue.patientName})`}
+                  </span>
+                </div>
+                <h3 className="text-2xl font-black mt-2 tracking-tight">
+                  Token #{liveQueue.queueNumber || liveQueue.bookingNumber || "Active"}
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 border-t border-white/10 pt-4 text-xs">
+                  <div>
+                    <span className="text-teal-100/70 block">Estimated Wait</span>
+                    <span className="font-extrabold text-sm">{liveQueue.estimatedWaitMins ? `~${Math.round(liveQueue.estimatedWaitMins)} min` : "Calculating..."}</span>
                   </div>
-
-                  <div className="bg-slate-50 p-4.5 rounded-2xl border border-slate-150/50 flex items-start gap-3">
-                    <AlertCircle className="h-5 w-5 text-[#0F4C81] shrink-0 mt-0.5" />
-                    <div>
-                      <h5 className="text-xs font-extrabold text-slate-800">Check-in Instructions</h5>
-                      <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
-                        Please head to the hospital reception desk at least 10 minutes before your estimated time. Show this ticket token pass to the counter personnel for check-in validation. If you miss your turn, you will be skipped.
-                      </p>
-                    </div>
+                  <div>
+                    <span className="text-teal-100/70 block">Position in Line</span>
+                    <span className="font-extrabold text-sm">#{liveQueue.positionAhead !== undefined ? liveQueue.positionAhead + 1 : "Calculating..."}</span>
+                  </div>
+                  <div>
+                    <span className="text-teal-100/70 block">Session Status</span>
+                    <span className="font-extrabold text-sm capitalize">{liveQueue.sessionStatus || "Active"}</span>
+                  </div>
+                  <div>
+                    <span className="text-teal-100/70 block">Booked At</span>
+                    <span className="font-extrabold text-sm">{new Date(liveQueue.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                   </div>
                 </div>
               </div>
-            ) : (
-              /* Scheduled Upcoming Appointment Card */
-              <div className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden text-left">
-                <div className="bg-gradient-to-br from-[#1E293B] to-[#334155] p-6 text-white relative">
-                  <div className="flex items-center justify-between">
+
+              <div className="p-6 space-y-6 text-left">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-slate-50 border border-slate-200/50 flex items-center justify-center text-[#0F4C81] font-bold shadow-sm shrink-0">
+                      <User className="h-6 w-6" />
+                    </div>
                     <div>
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold tracking-wide uppercase bg-sky-500/20 text-sky-200 border border-sky-400/30">
-                        Upcoming Appointment
-                      </span>
-                      <h3 className="text-xl font-black mt-2 tracking-tight">
-                        {activeQueue.hospitalId?.name || activeQueue.doctorId?.hospitalId?.name || "Affiliated Medical Center"}
-                      </h3>
-                      <p className="text-xs text-slate-300 mt-1">
-                        Ref: {activeQueue.bookingNumber || "Confirmed"}
-                      </p>
+                      <h4 className="text-base font-black text-slate-800">Dr. {liveQueue.doctorId?.name || "Consulting Practitioner"}</h4>
+                      <p className="text-xs text-slate-450 mt-0.5">{liveQueue.doctorId?.specialization || "General Medicine"} · {liveQueue.hospitalId?.name || "Affiliated Hospital"}</p>
                     </div>
-                    <div className="text-right">
-                      <div className="inline-flex flex-col items-end bg-white/10 px-4 py-2 rounded-2xl border border-white/10">
-                        <span className="text-[10px] uppercase tracking-wider text-slate-300 font-bold">Appointment Date</span>
-                        <span className="text-base font-black text-white">{activeQueue.date || "Scheduled Date"}</span>
-                        <span className="text-xs font-bold text-sky-200 mt-0.5">{activeQueue.slotTime || ""} Session</span>
-                      </div>
-                    </div>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      onClick={() => navigate("/patient/queue")}
+                      className="px-4 py-2 border border-slate-200 hover:border-slate-350 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                    >
+                      Track Progress
+                    </button>
+                    <button
+                      onClick={() => handleCancelQueue(liveQueue.bookingId || liveQueue._id)}
+                      className="px-4 py-2 border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Cancel Spot
+                    </button>
                   </div>
                 </div>
 
-                <div className="p-6 space-y-6">
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 rounded-2xl bg-sky-50 border border-sky-100 flex items-center justify-center text-[#0F4C81] font-bold shadow-sm shrink-0">
-                        <User className="h-6 w-6" />
-                      </div>
+                <div className="bg-slate-50 p-4.5 rounded-2xl border border-slate-150/50 flex items-start gap-3">
+                  <AlertCircle className="h-5 w-5 text-[#0F4C81] shrink-0 mt-0.5" />
+                  <div>
+                    <h5 className="text-xs font-extrabold text-slate-800">Check-in Instructions</h5>
+                    <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
+                      Please head to the hospital reception desk at least 10 minutes before your estimated time. Show this ticket token pass to the counter personnel for check-in validation. If you miss your turn, you will be skipped.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Upcoming Appointments List */}
+          {upcomingAppointments.length > 0 ? (
+            <div className="space-y-6">
+              {liveQueue && (
+                <div className="flex items-center justify-between pt-2">
+                  <h3 className="text-sm font-black text-slate-700 uppercase tracking-wider">Scheduled Consultations</h3>
+                  <span className="text-xs font-bold text-slate-400">{upcomingAppointments.length} upcoming</span>
+                </div>
+              )}
+              {upcomingAppointments.map((appt) => (
+                <div key={appt._id} className="bg-white rounded-3xl border border-slate-200/60 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden text-left">
+                  <div className="bg-gradient-to-br from-[#1E293B] to-[#334155] p-6 text-white relative">
+                    <div className="flex items-center justify-between">
                       <div>
-                        <h4 className="text-base font-black text-slate-800">
-                          Dr. {activeQueue.doctorId?.name || "Consulting Practitioner"}
-                        </h4>
-                        <p className="text-xs text-slate-500 mt-0.5 font-medium">
-                          {activeQueue.doctorId?.specialization || "General Medicine"}
+                        <div className="flex items-center gap-2">
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold tracking-wide uppercase bg-sky-500/20 text-sky-200 border border-sky-400/30">
+                            Upcoming Appointment
+                          </span>
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold tracking-wide uppercase bg-white/10 text-white border border-white/10">
+                            {appt.relationLabel === "Self" ? "Patient: Self" : `Family: ${appt.relationLabel} (${appt.patientName})`}
+                          </span>
+                        </div>
+                        <h3 className="text-xl font-black mt-2 tracking-tight">
+                          {appt.hospitalId?.name || "Affiliated Medical Center"}
+                        </h3>
+                        <p className="text-xs text-slate-300 mt-1">
+                          Ref: {appt.bookingNumber || "Confirmed"}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <div className="inline-flex flex-col items-end bg-white/10 px-4 py-2 rounded-2xl border border-white/10">
+                          <span className="text-[10px] uppercase tracking-wider text-slate-300 font-bold">Appointment Date</span>
+                          <span className="text-base font-black text-white">{appt.date || "Scheduled Date"}</span>
+                          <span className="text-xs font-bold text-sky-200 mt-0.5">{formatTime12(appt.slotTime)} Session</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-6 space-y-6">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-2xl bg-sky-50 border border-sky-100 flex items-center justify-center text-[#0F4C81] font-bold shadow-sm shrink-0">
+                          <User className="h-6 w-6" />
+                        </div>
+                        <div>
+                          <h4 className="text-base font-black text-slate-800">
+                            Dr. {appt.doctorId?.name || "Consulting Practitioner"}
+                          </h4>
+                          <p className="text-xs text-slate-500 mt-0.5 font-medium">
+                            {appt.doctorId?.specialization || "General Medicine"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2.5">
+                        <button
+                          onClick={() => handleCancelQueue(appt._id)}
+                          className="px-4 py-2 border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Cancel Appointment
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Live Clinic Status Card (Derived estimate if today) */}
+                    {appt.estimatedConsultationWindow ? (
+                      <div className="bg-sky-50/50 p-4.5 rounded-2xl border border-sky-150/70 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Activity className="h-4 w-4 text-[#0F4C81]" />
+                            <h5 className="text-xs font-black text-slate-800 uppercase tracking-wider">Live Clinic Status</h5>
+                          </div>
+                          {appt.estimatedConsultationWindow.isPaused ? (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
+                              Doctor on break
+                            </span>
+                          ) : appt.estimatedConsultationWindow.delayMinutes > 5 ? (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
+                              ~{appt.estimatedConsultationWindow.delayMinutes} min behind schedule
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                              On schedule
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                          <div className="bg-white p-3 rounded-xl border border-sky-100">
+                            <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Estimated Consultation</span>
+                            <span className="text-sm font-black text-[#0F4C81] mt-0.5 block">
+                              {formatConsultationWindow(appt.estimatedConsultationWindow)}
+                            </span>
+                          </div>
+                          <div className="bg-white p-3 rounded-xl border border-sky-100">
+                            <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Scheduled Arrival Slot</span>
+                            <span className="text-sm font-bold text-slate-850 mt-0.5 block">
+                              {formatTime12(appt.slotTime)} (Authoritative)
+                            </span>
+                          </div>
+                        </div>
+
+                        <p className="text-[10px] text-slate-500 italic leading-relaxed pt-1">
+                          * Note: Clinic delays do not change your scheduled check-in window. Please complete check-in on time by {formatTime12(appt.slotTime)} to secure your turn.
+                        </p>
+                      </div>
+                    ) : null}
+
+                    <div className="bg-slate-50 p-4.5 rounded-2xl border border-slate-150/50 flex items-start gap-3">
+                      <Calendar className="h-5 w-5 text-[#0F4C81] shrink-0 mt-0.5" />
+                      <div>
+                        <h5 className="text-xs font-extrabold text-slate-800">Appointment Check-in Information</h5>
+                        <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
+                          Your appointment is scheduled for {appt.date || "your selected date"} at {formatTime12(appt.slotTime) || "the booked time"}. Check-in will open 30 minutes before your slot time at the clinic reception desk or through your mobile portal.
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2.5">
-                      <button
-                        onClick={handleCancelQueue}
-                        className="px-4 py-2 border border-rose-200 text-rose-600 hover:bg-rose-50 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        Cancel Appointment
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Live Clinic Status Card (Derived estimate) */}
-                  {activeQueue.estimatedConsultationWindow ? (
-                    <div className="bg-sky-50/50 p-4.5 rounded-2xl border border-sky-150/70 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <Activity className="h-4 w-4 text-[#0F4C81]" />
-                          <h5 className="text-xs font-black text-slate-800 uppercase tracking-wider">Live Clinic Status</h5>
-                        </div>
-                        {activeQueue.estimatedConsultationWindow.isPaused ? (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
-                            Doctor on break
-                          </span>
-                        ) : activeQueue.estimatedConsultationWindow.delayMinutes > 5 ? (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">
-                            ~{activeQueue.estimatedConsultationWindow.delayMinutes} min behind schedule
-                          </span>
-                        ) : (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                            On schedule
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                        <div className="bg-white p-3 rounded-xl border border-sky-100">
-                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Estimated Consultation</span>
-                          <span className="text-sm font-black text-[#0F4C81] mt-0.5 block">
-                            {formatConsultationWindow(activeQueue.estimatedConsultationWindow)}
-                          </span>
-                        </div>
-                        <div className="bg-white p-3 rounded-xl border border-sky-100">
-                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block">Scheduled Arrival Slot</span>
-                          <span className="text-sm font-bold text-slate-850 mt-0.5 block">
-                            {formatTime12(activeQueue.slotTime)} (Authoritative)
-                          </span>
-                        </div>
-                      </div>
-
-                      <p className="text-[10px] text-slate-500 italic leading-relaxed pt-1">
-                        * Note: Clinic delays do not change your scheduled check-in window. Please complete check-in on time by {formatTime12(activeQueue.slotTime)} to secure your turn.
-                      </p>
-                    </div>
-                  ) : activeQueue.isToday && activeQueue.sessionStatus === "inactive" ? (
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-150/60 flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <Clock className="h-4 w-4 text-slate-400" />
-                        <span className="text-xs text-slate-600 font-bold">Clinic session has not opened yet today.</span>
-                      </div>
-                      <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-md bg-slate-200 text-slate-650">
-                        Scheduled: {formatTime12(activeQueue.slotTime)}
-                      </span>
-                    </div>
-                  ) : null}
-
-                  <div className="bg-slate-50 p-4.5 rounded-2xl border border-slate-150/50 flex items-start gap-3">
-                    <Calendar className="h-5 w-5 text-[#0F4C81] shrink-0 mt-0.5" />
-                    <div>
-                      <h5 className="text-xs font-extrabold text-slate-800">Appointment Check-in Information</h5>
-                      <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
-                        Your appointment is scheduled for {activeQueue.date || "your selected date"} at {formatTime12(activeQueue.slotTime) || "the booked time"}. Check-in will open 30 minutes before your slot time at the clinic reception desk or through your mobile portal.
-                      </p>
-                    </div>
                   </div>
                 </div>
-              </div>
-            )
-          ) : (
+              ))}
+            </div>
+          ) : !liveQueue ? (
             <div className="bg-white rounded-3xl border border-slate-200/60 p-10 text-center text-slate-500 shadow-sm max-w-lg mx-auto mt-6">
               <div className="w-14 h-14 rounded-full bg-slate-50 border border-slate-100 flex items-center justify-center text-[#0F4C81] mx-auto mb-4">
                 <Calendar className="h-6 w-6" />
@@ -395,7 +419,7 @@ export default function Appointments() {
                 Find Medical Clinics
               </button>
             </div>
-          )}
+          ) : null}
         </div>
       ) : (
         <div className="space-y-4">
