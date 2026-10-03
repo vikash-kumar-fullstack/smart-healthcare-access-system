@@ -43,11 +43,31 @@ export const getFamilyMembers = async (userId) => {
     rel.lastAccessedAt = now;
     await rel.save();
 
-    const activeBooking = await Queue.findOne({ userId: rel.relativeId._id, isActive: true })
+    const activeQueue = await Queue.findOne({ userId: rel.relativeId._id, isActive: true })
       .populate("doctorId");
 
+    let upcomingBooking = null;
+    if (!activeQueue) {
+      const AppointmentBooking = mongoose.model("AppointmentBooking");
+      upcomingBooking = await AppointmentBooking.findOne({
+        userId: rel.relativeId._id,
+        status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] },
+        arrivalStatus: { $ne: "NO_SHOW" }
+      })
+        .populate("doctorId", "name specialization")
+        .sort({ date: 1, slotTime: 1 });
+    }
+
     const relObj = rel.toObject();
-    relObj.activeBooking = activeBooking || null;
+    relObj.activeBooking = activeQueue || (upcomingBooking ? {
+      bookingId: upcomingBooking._id,
+      bookingNumber: upcomingBooking.bookingNumber,
+      date: upcomingBooking.date,
+      slotTime: upcomingBooking.slotTime,
+      doctorId: upcomingBooking.doctorId,
+      status: upcomingBooking.status,
+      isUpcoming: true
+    } : null);
     activeMembers.push(relObj);
   }
 

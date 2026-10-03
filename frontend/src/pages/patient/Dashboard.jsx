@@ -399,6 +399,11 @@ export default function PatientDashboard() {
               >
                 {activeQueue.isLiveQueue ? "Open Live Queue Tracker →" : "View Appointment Details →"}
               </button>
+              {Array.isArray(activeQueue?.upcomingAppointments) && activeQueue.upcomingAppointments.length > 1 && (
+                <span className="text-[10px] text-cyan-100 font-bold mt-1 block">
+                  +{activeQueue.upcomingAppointments.length - 1} more scheduled
+                </span>
+              )}
             </div>
           </div>
         </div>

@@ -14,6 +14,8 @@ import { incrementSystemMetric } from "../doctor/system_monitoring.model.js";
 import AppointmentBooking from "./appointment_booking.model.js";
 import Visit from "../visit/visit.model.js";
 import BookingCounter from "./booking_counter.model.js";
+import User from "../auth/auth.model.js";
+import FamilyRelationship from "../user/family_relationship.model.js";
 
 // ─── IST-safe "today" date string ────────────────────────────────────────────
 const getTodayIST = () =>
@@ -375,14 +377,36 @@ export const executeBookQueue = async (userId, doctorId, bookingDate, slotTime =
     }
   }
 
-  // B. Check if patient already has a confirmed appointment for the same doctor, date, and slot
+  // B. Enforce account-level booking limit (MAX_UPCOMING_APPOINTMENTS = 3)
+  const ownerId = bookedByUserId || userId;
+  const activeUpcomingStatuses = ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"];
+  const upcomingCount = await AppointmentBooking.countDocuments({
+    $or: [
+      { userId: ownerId },
+      { bookedByUserId: ownerId }
+    ],
+    status: { $in: activeUpcomingStatuses },
+    arrivalStatus: { $ne: "NO_SHOW" }
+  });
+
+  const MAX_UPCOMING_APPOINTMENTS = 3;
+  if (upcomingCount >= MAX_UPCOMING_APPOINTMENTS) {
+    return {
+      canBook: false,
+      code: "MAX_UPCOMING_APPOINTMENTS_REACHED",
+      reason: "You can have up to 3 upcoming appointments. Please manage an existing appointment before booking another.",
+      action: "manage_existing"
+    };
+  }
+
+  // C. Check if patient already has a confirmed appointment for the same doctor, date, and slot
   if (slotTime) {
     const existingSlotBooking = await AppointmentBooking.findOne({
       userId,
       doctorId,
       date: bookingDateStr,
       slotTime,
-      status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY"] }
+      status: { $in: activeUpcomingStatuses }
     });
     if (existingSlotBooking) {
       const isRecentRetry = (Date.now() - new Date(existingSlotBooking.createdAt).getTime()) < 60000;
@@ -412,6 +436,23 @@ export const executeBookQueue = async (userId, doctorId, bookingDate, slotTime =
         action: "wait"
       };
     }
+  }
+
+  // D. Check if this same patient already has an appointment with the same doctor on the same date (different slot)
+  const existingDoctorDateBooking = await AppointmentBooking.findOne({
+    userId,
+    doctorId,
+    date: bookingDateStr,
+    status: { $in: activeUpcomingStatuses },
+    arrivalStatus: { $ne: "NO_SHOW" }
+  });
+  if (existingDoctorDateBooking) {
+    return {
+      canBook: false,
+      code: "DUPLICATE_DOCTOR_DATE_APPOINTMENT",
+      reason: "You already have an appointment with this doctor on this date.",
+      action: "choose_other_date"
+    };
   }
 
   // ── 2. Validate patient & check reliability / no-show limits from patient_stats ──
@@ -1680,59 +1721,54 @@ export const calculateEstimatedConsultationWindow = async ({
 //  GET MY QUEUE (Patient View - Omit QueueNumber, return PatientsAhead and ETA)
 // ═══════════════════════════════════════════════════════════════════════════════
 export const getMyQueue = async (userId) => {
-  const booking = await AppointmentBooking.findOne({
-    userId,
-    status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] }
+  const activeUpcomingStatuses = ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"];
+  const todayStr = getTodayIST();
+
+  // 1. Fetch all active upcoming bookings managed by this user (self + family members)
+  const bookings = await AppointmentBooking.find({
+    $or: [
+      { userId },
+      { bookedByUserId: userId }
+    ],
+    status: { $in: activeUpcomingStatuses },
+    arrivalStatus: { $ne: "NO_SHOW" }
   })
     .populate("doctorId", "name specialization avgConsultationTime")
-    .populate("hospitalId", "name");
+    .populate("hospitalId", "name")
+    .populate("userId", "name phone email")
+    .populate("relationshipId", "relationType")
+    .sort({ date: 1, slotTime: 1 });
 
-  if (!booking) {
-    throw Object.assign(new Error("No active booking found."), { status: 404 });
-  }
-
+  // 2. Fetch live queue for this user (if checked in)
   const queue = await Queue.findOne({ userId, isActive: true })
     .populate("doctorId")
     .populate("sessionId");
 
-  let patientsAhead = 0;
-  let eta = null;
-  let isNext = false;
-  let sessionStatus = "inactive";
-  let sessionActive = false;
-
-  const todayStr = getTodayIST();
-  const isToday = booking.date === todayStr;
-
-  // Resolve session (either from active queue or from booking session/date)
-  let session = queue?.sessionId;
-  if (!session && isToday) {
-    const QueueSessionModel = mongoose.model("QueueSession");
-    session = await QueueSessionModel.findOne({
-      doctorId: booking.doctorId?._id || booking.doctorId,
-      date: todayStr
-    });
+  if (bookings.length === 0 && !queue) {
+    throw Object.assign(new Error("No active booking found."), { status: 404 });
   }
 
-  if (session) {
-    sessionStatus = session.sessionStatus || "inactive";
-    sessionActive = sessionStatus === "active";
-  }
-
+  // 3. Process Live Queue (if present)
+  let liveQueuePayload = null;
   if (queue) {
+    let patientsAhead = 0;
+    let eta = null;
+    let isNext = false;
+    let sessionStatus = queue.sessionId?.sessionStatus || "inactive";
+    let sessionActive = sessionStatus === "active";
+
     patientsAhead = await Queue.countDocuments({
       doctorId: queue.doctorId._id,
-      sessionId: session?._id || queue.sessionId?._id,
+      sessionId: queue.sessionId?._id,
       status: "waiting",
       queueNumber: { $lt: queue.queueNumber }
     });
 
-    if (sessionActive && session) {
+    if (sessionActive && queue.sessionId) {
       const avgTime = await calculateAvgConsultationTime(queue.doctorId._id);
-
       const current = await Queue.findOne({
         doctorId: queue.doctorId._id,
-        sessionId: session._id,
+        sessionId: queue.sessionId._id,
         status: "in_progress"
       });
 
@@ -1747,58 +1783,152 @@ export const getMyQueue = async (userId) => {
       if (queue.status === "waiting" && current) {
         const nextInLine = await Queue.findOne({
           doctorId: queue.doctorId._id,
-          sessionId: session._id,
+          sessionId: queue.sessionId._id,
           status: "waiting"
         }).sort({ isPriority: -1, queueNumber: 1 });
 
         isNext = nextInLine?._id.toString() === queue._id.toString();
       }
     }
+
+    const liveBooking = bookings.find(b => b.sessionId?.toString() === queue.sessionId?._id?.toString() || b.sessionId?.toString() === queue.sessionId?.toString())
+      || await AppointmentBooking.findOne({
+        userId: queue.userId,
+        sessionId: queue.sessionId,
+        status: { $in: activeUpcomingStatuses }
+      }).populate("doctorId", "name specialization avgConsultationTime")
+        .populate("hospitalId", "name")
+        .populate("userId", "name phone email");
+
+    let liveConsultationWindow = null;
+    if (liveBooking) {
+      try {
+        liveConsultationWindow = await calculateEstimatedConsultationWindow({
+          booking: liveBooking,
+          queue,
+          session: queue.sessionId
+        });
+      } catch (err) {
+        liveConsultationWindow = null;
+      }
+    }
+
+    const Visit = mongoose.model("Visit");
+    const visitDoc = await Visit.findOne({ queueId: queue._id, deletedAt: null });
+
+    const liveRelationLabel = liveBooking?.bookedForType === "FAMILY_MEMBER"
+      ? (liveBooking.relationshipId?.relationType || "Family Member")
+      : "Self";
+
+    liveQueuePayload = {
+      _id: liveBooking?._id || queue._id,
+      bookingId: liveBooking?._id || null,
+      queueId: queue._id,
+      bookingNumber: liveBooking?.bookingNumber || `TK-${queue.queueNumber}`,
+      queueNumber: queue.queueNumber,
+      patientId: liveBooking?.userId?._id || queue.userId,
+      patientName: liveBooking?.userId?.name || "Patient",
+      bookedForType: liveBooking?.bookedForType || queue.bookedForType || "SELF",
+      relationLabel: liveRelationLabel,
+      date: liveBooking?.date || todayStr,
+      slotTime: liveBooking?.slotTime || queue.slotTime,
+      doctorId: liveBooking?.doctorId || queue.doctorId,
+      hospitalId: liveBooking?.hospitalId || queue.doctorId?.hospitalId,
+      status: queue.status,
+      arrivalStatus: liveBooking?.arrivalStatus || "CHECKED_IN",
+      patientsAhead,
+      eta,
+      sessionStatus,
+      sessionActive,
+      isNext,
+      visitId: visitDoc?._id || null,
+      publicId: visitDoc?.publicId || null,
+      createdAt: queue.createdAt || liveBooking?.createdAt,
+      isLiveQueue: true,
+      isUpcoming: false,
+      appointmentType: "live_queue",
+      estimatedConsultationWindow: liveConsultationWindow
+    };
   }
 
-  // Calculate dynamic consultation window
-  let estimatedConsultationWindow = null;
-  try {
-    estimatedConsultationWindow = await calculateEstimatedConsultationWindow({
-      booking,
-      queue,
-      session
-    });
-  } catch (err) {
-    console.error("Failed to calculate estimated consultation window:", err);
-    estimatedConsultationWindow = null;
+  // 4. Process all upcoming appointments
+  const upcomingAppointments = await Promise.all(bookings.map(async (b) => {
+    const isApptToday = b.date === todayStr;
+    const isThisLive = Boolean(liveQueuePayload && liveQueuePayload.bookingId?.toString() === b._id.toString());
+
+    let windowEstimate = null;
+    if (isApptToday) {
+      try {
+        const QueueSessionModel = mongoose.model("QueueSession");
+        const sDoc = await QueueSessionModel.findOne({
+          doctorId: b.doctorId?._id || b.doctorId,
+          date: todayStr
+        });
+        windowEstimate = await calculateEstimatedConsultationWindow({
+          booking: b,
+          queue: isThisLive ? queue : null,
+          session: sDoc
+        });
+      } catch (err) {
+        windowEstimate = null;
+      }
+    }
+
+    const relationLabel = b.bookedForType === "FAMILY_MEMBER"
+      ? (b.relationshipId?.relationType || "Family Member")
+      : "Self";
+
+    return {
+      _id: b._id,
+      bookingId: b._id,
+      bookingNumber: b.bookingNumber,
+      patientId: b.userId?._id || b.userId,
+      patientName: b.userId?.name || "Patient",
+      bookedForType: b.bookedForType,
+      relationLabel,
+      date: b.date,
+      slotTime: b.slotTime,
+      doctorId: b.doctorId,
+      hospitalId: b.hospitalId,
+      status: b.status,
+      arrivalStatus: b.arrivalStatus,
+      checkInTime: b.checkInTime,
+      checkInMethod: b.checkInMethod,
+      isToday: isApptToday,
+      isLiveQueue: isThisLive,
+      isUpcoming: !isThisLive,
+      appointmentType: isThisLive ? "live_queue" : "upcoming",
+      estimatedConsultationWindow: windowEstimate,
+      createdAt: b.createdAt
+    };
+  }));
+
+  // 5. Construct unified, backward-compatible response
+  if (liveQueuePayload) {
+    return {
+      ...liveQueuePayload,
+      liveQueue: liveQueuePayload,
+      upcomingAppointments
+    };
   }
 
-  const visitDoc = queue ? await Visit.findOne({ queueId: queue._id, deletedAt: null }) : null;
-
-  const isCheckedIn = booking.arrivalStatus === "CHECKED_IN";
-  const hasActiveQueue = !!queue && queue.isActive === true;
-  const isLive = isToday && isCheckedIn && hasActiveQueue;
-
+  // Fallback to top upcoming appointment as primary object for backward compatibility
+  const primary = upcomingAppointments[0];
   return {
-    _id: booking._id,
-    bookingId: booking._id,
-    patientsAhead,
-    eta,
-    status: queue?.status || booking.status,
-    arrivalStatus: booking.arrivalStatus,
-    bookingNumber: booking.bookingNumber,
-    queueNumber: queue?.queueNumber || null,
-    date: booking.date,
-    slotTime: booking.slotTime || queue?.slotTime,
-    doctorId: booking.doctorId,
-    hospitalId: booking.hospitalId,
-    sessionStatus,
-    sessionActive,
-    isNext,
-    visitId: visitDoc?._id || null,
-    publicId: visitDoc?.publicId || null,
-    createdAt: booking.createdAt,
-    // Lifecycle enrichment
-    appointmentType: isLive ? "live_queue" : "upcoming",
-    isLiveQueue: isLive,
-    isUpcoming: !isLive,
-    estimatedConsultationWindow
+    ...primary,
+    patientsAhead: 0,
+    eta: null,
+    queueNumber: null,
+    sessionStatus: "inactive",
+    sessionActive: false,
+    isNext: false,
+    visitId: null,
+    publicId: null,
+    appointmentType: "upcoming",
+    isLiveQueue: false,
+    isUpcoming: true,
+    liveQueue: null,
+    upcomingAppointments
   };
 };
 
@@ -1991,13 +2121,48 @@ export const getDoctorQueue = async (doctorId) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CANCEL QUEUE (Patient)
 // ═══════════════════════════════════════════════════════════════════════════════
-export const cancelQueue = async (userId) => {
-  const booking = await AppointmentBooking.findOne({
-    userId,
-    status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] }
-  });
+export const cancelQueue = async (userId, targetBookingId = null) => {
+  let booking = null;
+  let queue = null;
 
-  const queue = await Queue.findOne({ userId, isActive: true });
+  if (targetBookingId) {
+    const isObjectId = mongoose.isValidObjectId(targetBookingId);
+    const bookingQuery = isObjectId
+      ? { _id: targetBookingId }
+      : { bookingNumber: targetBookingId };
+
+    const targetDoc = await AppointmentBooking.findOne(bookingQuery);
+    if (!targetDoc) {
+      throw Object.assign(new Error("Appointment not found."), { status: 404 });
+    }
+
+    // Verify ownership: either booked by this user or for this user
+    const isOwner = targetDoc.userId?.toString() === userId.toString() ||
+                    targetDoc.bookedByUserId?.toString() === userId.toString();
+    if (!isOwner) {
+      throw Object.assign(new Error("Access denied: You do not have permission to cancel this appointment."), { status: 403 });
+    }
+
+    if (["CANCELLED", "COMPLETED", "EXPIRED"].includes(targetDoc.status)) {
+      throw Object.assign(new Error("Appointment is already cancelled or completed."), { status: 400 });
+    }
+
+    booking = targetDoc;
+    if (booking.sessionId) {
+      queue = await Queue.findOne({
+        userId: booking.userId,
+        sessionId: booking.sessionId,
+        isActive: true
+      });
+    }
+  } else {
+    booking = await AppointmentBooking.findOne({
+      $or: [{ userId }, { bookedByUserId: userId }],
+      status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] }
+    }).sort({ date: 1, slotTime: 1 });
+
+    queue = await Queue.findOne({ userId, isActive: true });
+  }
 
   if (!booking && !queue) {
     throw Object.assign(new Error("No active booking found."), { status: 404 });
