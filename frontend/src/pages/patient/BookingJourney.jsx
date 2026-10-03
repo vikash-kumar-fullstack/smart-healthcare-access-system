@@ -58,6 +58,30 @@ export default function BookingJourney() {
   const [familyLoading, setFamilyLoading] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState(null); // null = Self
 
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("user");
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.error("Failed to parse cached user:", e);
+    }
+    return null;
+  });
+
+  useEffect(() => {
+    if (!currentUser?.name) {
+      api.get("/auth/me")
+        .then(res => {
+          if (res.data?.success && res.data.data) {
+            setCurrentUser(res.data.data);
+          }
+        })
+        .catch(err => console.error("Failed to fetch authenticated user profile:", err));
+    }
+  }, []);
+
   useEffect(() => {
     const fetchFamily = async () => {
       setFamilyLoading(true);
@@ -378,7 +402,9 @@ export default function BookingJourney() {
                       👨
                     </div>
                     <div>
-                      <h3 className="text-token-card-title text-slate-800">Self (Arun Kumar)</h3>
+                      <h3 className="text-token-card-title text-slate-800">
+                        Self ({currentUser?.name || "Account Owner"})
+                      </h3>
                       <p className="text-xs font-semibold text-slate-450 mt-1">Account Owner Profile</p>
                     </div>
                   </div>
@@ -703,7 +729,7 @@ export default function BookingJourney() {
                 <div>
                   <span className="text-token-caption block">PATIENT</span>
                   <span className="text-token-section text-slate-800">
-                    {selectedPatient ? selectedPatient.name : "Self (Arun Kumar)"}
+                    {selectedPatient ? selectedPatient.name : `Self (${currentUser?.name || "Account Owner"})`}
                   </span>
                   <span className="text-token-caption block mt-1">
                     {selectedPatient ? "Family Member" : "Account Owner"}
