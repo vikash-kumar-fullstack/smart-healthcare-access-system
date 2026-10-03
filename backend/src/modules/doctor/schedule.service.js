@@ -592,32 +592,37 @@ export const generateDoctorSlots = async (doctorId, dateStr) => {
     status: { $nin: ["CANCELLED", "EXPIRED"] }
   });
 
-  const consultTime = doctor.avgConsultationTime || 10;
+  const consultTime = (typeof doctor.avgConsultationTime === "number" && doctor.avgConsultationTime > 0)
+    ? doctor.avgConsultationTime
+    : 10;
 
   for (const shift of scheduleShifts) {
     const startMins = parseTimeToMinutes(shift.startTime);
     const endMins = parseTimeToMinutes(shift.endTime);
 
-    for (let current = startMins; current < endMins; current += consultTime) {
+    for (let current = startMins; current + consultTime <= endMins; current += consultTime) {
       const slotHour = Math.floor(current / 60).toString().padStart(2, "0");
       const slotMin = (current % 60).toString().padStart(2, "0");
       const timeLabel = `${slotHour}:${slotMin}`;
 
       let status = "AVAILABLE";
 
-      // Break check
+      const slotStart = current;
+      const slotEnd = current + consultTime;
+
+      // Break check (interval overlap)
       const insideBreak = breaks.some(b => {
         const bs = parseTimeToMinutes(b.startTime);
         const be = parseTimeToMinutes(b.endTime);
-        return current >= bs && current < be;
+        return slotStart < be && bs < slotEnd;
       });
       if (insideBreak) status = "BREAK";
 
-      // Leave check
+      // Leave check (interval overlap)
       const insideLeave = partialLeaves.some(l => {
         const ls = parseTimeToMinutes(l.startTime);
         const le = parseTimeToMinutes(l.endTime);
-        return current >= ls && current < le;
+        return slotStart < le && ls < slotEnd;
       });
       if (insideLeave) status = "LEAVE";
 
