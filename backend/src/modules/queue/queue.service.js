@@ -16,6 +16,7 @@ import Visit from "../visit/visit.model.js";
 import BookingCounter from "./booking_counter.model.js";
 import User from "../auth/auth.model.js";
 import FamilyRelationship from "../user/family_relationship.model.js";
+import AccountBookingCapacity from "./account_booking_capacity.model.js";
 
 // ─── IST-safe "today" date string ────────────────────────────────────────────
 const getTodayIST = () =>
@@ -293,6 +294,82 @@ export const bookQueue = async (userId, doctorId, bookingDate, slotTime = null, 
     });
   }
   return result;
+};
+
+export const releaseBookingCapacity = async (ownerId, bookingId) => {
+  if (!ownerId || !bookingId) return;
+  try {
+    await AccountBookingCapacity.updateOne(
+      { ownerId },
+      { $pull: { activeBookings: bookingId } }
+    );
+  } catch (err) {
+    // Non-fatal logging if needed
+  }
+};
+
+export const acquireBookingCapacity = async (ownerId, prospectiveBookingId) => {
+  const MAX_UPCOMING_APPOINTMENTS = 3;
+  const activeUpcomingStatuses = ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"];
+
+  // 1. Authoritative check from AppointmentBooking
+  const activeDocs = await AppointmentBooking.find({
+    $or: [{ userId: ownerId }, { bookedByUserId: ownerId }],
+    status: { $in: activeUpcomingStatuses },
+    arrivalStatus: { $ne: "NO_SHOW" }
+  }).distinct("_id");
+
+  if (activeDocs.length >= MAX_UPCOMING_APPOINTMENTS) {
+    await AccountBookingCapacity.updateOne(
+      { ownerId },
+      { $set: { activeBookings: activeDocs } },
+      { upsert: true }
+    );
+    return {
+      acquired: false,
+      code: "MAX_UPCOMING_APPOINTMENTS_REACHED",
+      reason: "You can have up to 3 upcoming appointments. Please manage an existing appointment before booking another."
+    };
+  }
+
+  // 2. Ensure capacity doc exists and is reconciled with activeDocs
+  await AccountBookingCapacity.updateOne(
+    { ownerId },
+    { $setOnInsert: { ownerId, activeBookings: activeDocs } },
+    { upsert: true }
+  );
+
+  // Prune any IDs that are no longer active in AppointmentBooking
+  await AccountBookingCapacity.updateOne(
+    { ownerId },
+    {
+      $pull: {
+        activeBookings: { $nin: [...activeDocs, prospectiveBookingId] }
+      }
+    }
+  );
+
+  // 3. ATOMIC conditional push: only push prospectiveBookingId if current size < 3
+  const capacityDoc = await AccountBookingCapacity.findOneAndUpdate(
+    {
+      ownerId,
+      $expr: { $lt: [{ $size: "$activeBookings" }, MAX_UPCOMING_APPOINTMENTS] }
+    },
+    {
+      $addToSet: { activeBookings: prospectiveBookingId }
+    },
+    { returnDocument: "after" }
+  );
+
+  if (!capacityDoc) {
+    return {
+      acquired: false,
+      code: "MAX_UPCOMING_APPOINTMENTS_REACHED",
+      reason: "You can have up to 3 upcoming appointments. Please manage an existing appointment before booking another."
+    };
+  }
+
+  return { acquired: true };
 };
 
 export const executeBookQueue = async (userId, doctorId, bookingDate, slotTime = null, bookedByUserId = null, relationshipId = null, bookedForType = "SELF") => {
@@ -635,6 +712,18 @@ export const executeBookQueue = async (userId, doctorId, bookingDate, slotTime =
     .substring(0, 3);
   const cleanDateStr = bookingDateStr.replace(/-/g, "").substring(2);
 
+  // Atomic acquisition of booking capacity under concurrency
+  const prospectiveBookingId = new mongoose.Types.ObjectId();
+  const capacityResult = await acquireBookingCapacity(ownerId, prospectiveBookingId);
+  if (!capacityResult.acquired) {
+    return {
+      canBook: false,
+      code: capacityResult.code,
+      reason: capacityResult.reason,
+      action: "manage_existing"
+    };
+  }
+
   const counterDoc = await BookingCounter.findOneAndUpdate(
     { hospitalId: doctor.hospitalId, date: bookingDateStr },
     { $inc: { count: 1 } },
@@ -644,20 +733,86 @@ export const executeBookQueue = async (userId, doctorId, bookingDate, slotTime =
   const runningNum = String(counterDoc.count).padStart(4, "0");
   const bookingNumber = `${hospCode}-${cleanDateStr}-${runningNum}`;
 
-  const booking = await AppointmentBooking.create({
-    bookingNumber,
-    userId,
-    doctorId,
-    hospitalId: doctor.hospitalId,
-    sessionId: session._id,
-    date: bookingDateStr,
-    slotTime,
-    status: "CONFIRMED",
-    arrivalStatus: "NOT_ARRIVED",
-    bookedByUserId,
-    relationshipId,
-    bookedForType
-  });
+  let booking;
+  try {
+    booking = await AppointmentBooking.create({
+      _id: prospectiveBookingId,
+      bookingNumber,
+      userId,
+      doctorId,
+      hospitalId: doctor.hospitalId,
+      sessionId: session._id,
+      date: bookingDateStr,
+      slotTime,
+      status: "CONFIRMED",
+      arrivalStatus: "NOT_ARRIVED",
+      bookedByUserId,
+      relationshipId,
+      bookedForType
+    });
+  } catch (err) {
+    // Release capacity reservation immediately
+    await releaseBookingCapacity(ownerId, prospectiveBookingId);
+
+    // Precise E11000 handling for active-slot conflict
+    if (err.code === 11000) {
+      const errKeyPattern = err.keyPattern || {};
+      const errMessage = err.message || "";
+      const isSlotConflict =
+        (errKeyPattern.doctorId && errKeyPattern.date && errKeyPattern.slotTime) ||
+        errMessage.includes("uniq_active_doctor_date_slot") ||
+        errMessage.includes("doctorId_1_date_1_slotTime_1");
+
+      if (isSlotConflict) {
+        // 1. Check whether an existing booking belongs to the same owner/user within 60-second idempotency window
+        const existingSlot = await AppointmentBooking.findOne({
+          doctorId,
+          date: bookingDateStr,
+          slotTime,
+          status: { $in: activeUpcomingStatuses },
+          $or: [
+            { userId: ownerId },
+            { bookedByUserId: ownerId },
+            { userId }
+          ]
+        });
+
+        if (existingSlot) {
+          const isRecentRetry = (Date.now() - new Date(existingSlot.createdAt).getTime()) < 60000;
+          if (isRecentRetry) {
+            return {
+              canBook: true,
+              booking: {
+                queueId: null,
+                bookingId: existingSlot._id,
+                bookingNumber: existingSlot.bookingNumber,
+                status: existingSlot.status,
+                date: existingSlot.date,
+                slotTime: existingSlot.slotTime,
+                isPriority: false,
+                patientsAhead: 0,
+                eta: null,
+                visit: null
+              },
+              guidance: "Returning existing scheduled appointment details (idempotent retry).",
+              message: "You already have an active booking for this slot."
+            };
+          }
+        }
+
+        // 2. Otherwise: structured booking failure
+        return {
+          canBook: false,
+          code: "SLOT_UNAVAILABLE",
+          reason: "This slot was just reserved by another patient. Please select an alternative slot.",
+          action: "choose_other_time"
+        };
+      }
+    }
+
+    // Do NOT convert unrelated E11000 errors into SLOT_UNAVAILABLE
+    throw err;
+  }
 
   // ── 9. Check Priority Credit consumption & cleanup expired credits ────────
   await BookingCredit.updateMany(
@@ -1220,6 +1375,12 @@ export const completeQueue = async (queueId, doctorId) => {
 
     await current.save({ session: mongooseSession });
 
+    const bookingsToComplete = await AppointmentBooking.find({
+      userId: current.userId,
+      sessionId: current.sessionId,
+      status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] }
+    }).session(mongooseSession);
+
     // Synchronize AppointmentBooking to COMPLETED
     await AppointmentBooking.updateMany(
       { userId: current.userId, sessionId: current.sessionId, status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] } },
@@ -1308,6 +1469,10 @@ export const completeQueue = async (queueId, doctorId) => {
 
     await mongooseSession.commitTransaction();
     mongooseSession.endSession();
+
+    for (const b of bookingsToComplete) {
+      releaseBookingCapacity(b.bookedByUserId || b.userId, b._id).catch(() => {});
+    }
 
     setImmediate(() => {
       triggerQueueRealtimeEvents(doctorId, { _id: current.sessionId }, current, next, "QUEUE_COMPLETED");
@@ -2171,6 +2336,7 @@ export const cancelQueue = async (userId, targetBookingId = null) => {
   if (booking) {
     booking.status = "CANCELLED";
     await booking.save();
+    await releaseBookingCapacity(booking.bookedByUserId || booking.userId, booking._id);
   }
 
   if (queue) {

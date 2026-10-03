@@ -83,7 +83,28 @@ const appointmentBookingSchema = new mongoose.Schema({
 appointmentBookingSchema.index({ doctorId: 1, date: 1 });
 appointmentBookingSchema.index({ userId: 1, status: 1 });
 appointmentBookingSchema.index({ bookingNumber: 1, doctorId: 1 }, { unique: true });
-appointmentBookingSchema.index({ doctorId: 1, date: 1, slotTime: 1 });
+appointmentBookingSchema.index(
+  {
+    doctorId: 1,
+    date: 1,
+    slotTime: 1
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: {
+        $in: [
+          "BOOKED",
+          "CONFIRMED",
+          "REMINDER_SENT",
+          "READY",
+          "IN_CONSULTATION"
+        ]
+      }
+    },
+    name: "uniq_active_doctor_date_slot"
+  }
+);
 appointmentBookingSchema.index({ userId: 1, createdAt: 1 });
 appointmentBookingSchema.index({ status: 1 });
 appointmentBookingSchema.index({ checkInTime: 1 });
