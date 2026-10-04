@@ -533,6 +533,124 @@ async function runConcurrencyTests() {
     assert(capacityCollectionExists.length > 0, "19d. accountbookingcapacities collection persisted in MongoDB");
 
     // ──────────────────────────────────────────────────
+    // MANDATORY STRESS TESTS: Repeated concurrent races at count=2
+    // ──────────────────────────────────────────────────
+    console.log("\n--> MANDATORY STRESS TESTS: 10 repeated concurrent races at count=2");
+    let stressRacesPassed = 0;
+    for (let i = 1; i <= 10; i++) {
+      const uStressRace = await User.create({
+        name: `Stress Race User ${i}`,
+        email: `stress.race.${i}.${Date.now()}@health.local`,
+        role: "patient",
+        passwordHash: "hash"
+      });
+
+      const dayA = getFutureDateStr(2);
+      const dayB = getFutureDateStr(3);
+
+      const totalMinutes = 14 * 60 + (i * 10);
+      const slotHour = String(Math.floor(totalMinutes / 60)).padStart(2, "0");
+      const slotMin = String(totalMinutes % 60).padStart(2, "0");
+      const testSlot = `${slotHour}:${slotMin}`;
+
+      // Book 2 appointments
+      const b1 = await executeBookQueue(uStressRace._id, doctor._id, dayA, testSlot);
+      const b2 = await executeBookQueue(uStressRace._id, doctor2._id, dayA, testSlot);
+      if (!b1.canBook || !b2.canBook) {
+        console.error(`  [FAIL] Stress Race ${i}: Initial setup failed to create 2 appointments: b1=${b1.code || b1.reason}, b2=${b2.code || b2.reason}`);
+        failed++;
+        continue;
+      }
+
+      // Verify DB count is exactly 2 before race
+      const initialDbCount = await AppointmentBooking.countDocuments({
+        $or: [{ userId: uStressRace._id }, { bookedByUserId: uStressRace._id }],
+        status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] },
+        arrivalStatus: { $ne: "NO_SHOW" }
+      });
+      if (initialDbCount !== 2) {
+        console.error(`  [FAIL] Stress Race ${i}: Expected initial DB count = 2, got ${initialDbCount}`);
+        failed++;
+        continue;
+      }
+
+      // Fire 2 simultaneous booking requests for 3rd slot
+      const [r1, r2] = await Promise.all([
+        executeBookQueue(uStressRace._id, doctor._id, dayB, testSlot),
+        executeBookQueue(uStressRace._id, doctor2._id, dayB, testSlot)
+      ]);
+
+      const passes = [r1, r2].filter(r => r.canBook === true);
+      const fails = [r1, r2].filter(r => r.canBook === false && r.code === "MAX_UPCOMING_APPOINTMENTS_REACHED");
+
+      // Query database directly
+      const finalDbCount = await AppointmentBooking.countDocuments({
+        $or: [{ userId: uStressRace._id }, { bookedByUserId: uStressRace._id }],
+        status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] },
+        arrivalStatus: { $ne: "NO_SHOW" }
+      });
+
+      const racePassed = passes.length === 1 && fails.length === 1 && finalDbCount === 3;
+      if (racePassed) {
+        stressRacesPassed++;
+      } else {
+        console.error(`  [FAIL] Stress Race ${i}: passes=${passes.length}, fails=${fails.length}, finalDbCount=${finalDbCount}`);
+      }
+    }
+    assert(stressRacesPassed === 10, `Mandatory Stress: All 10 repeated concurrent races at count=2 passed strictly (Got ${stressRacesPassed}/10)`);
+
+    // ──────────────────────────────────────────────────
+    // MANDATORY STRESS TESTS: 5 simultaneous requests from count=2
+    // ──────────────────────────────────────────────────
+    console.log("\n--> MANDATORY STRESS TESTS: 5 simultaneous requests from count=2");
+    const uStress5 = await User.create({
+      name: "Stress 5 Simultaneous User",
+      email: `stress.5sim.${Date.now()}@health.local`,
+      role: "patient",
+      passwordHash: "hash"
+    });
+
+    const day4 = getFutureDateStr(4);
+    const day5 = getFutureDateStr(5);
+    const day6 = getFutureDateStr(6);
+    const day7 = getFutureDateStr(7);
+
+    const s1 = await executeBookQueue(uStress5._id, doctor._id, day4, "16:00");
+    const s2 = await executeBookQueue(uStress5._id, doctor2._id, day4, "16:00");
+    assert(s1.canBook === true && s2.canBook === true, "5-sim setup: Initial 2 appointments booked successfully");
+
+    const initialDbCount5 = await AppointmentBooking.countDocuments({
+      $or: [{ userId: uStress5._id }, { bookedByUserId: uStress5._id }],
+      status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] },
+      arrivalStatus: { $ne: "NO_SHOW" }
+    });
+    assert(initialDbCount5 === 2, "5-sim setup: Initial DB count is exactly 2");
+
+    // Fire 5 simultaneous requests across valid dates within the 7-day window
+    const race5Results = await Promise.all([
+      executeBookQueue(uStress5._id, doctor._id, day5, "16:00"),
+      executeBookQueue(uStress5._id, doctor2._id, day5, "16:00"),
+      executeBookQueue(uStress5._id, doctor._id, day6, "16:00"),
+      executeBookQueue(uStress5._id, doctor2._id, day6, "16:00"),
+      executeBookQueue(uStress5._id, doctor._id, day7, "16:00")
+    ]);
+
+    const passes5 = race5Results.filter(r => r.canBook === true);
+    const fails5 = race5Results.filter(r => r.canBook === false && r.code === "MAX_UPCOMING_APPOINTMENTS_REACHED");
+
+    assert(passes5.length === 1, `5-sim race: Exactly 1 of 5 simultaneous requests succeeds (Got: ${passes5.length})`);
+    assert(fails5.length === 4, `5-sim race: Exactly 4 of 5 simultaneous requests rejected with MAX_UPCOMING_APPOINTMENTS_REACHED (Got: ${fails5.length})`);
+
+    const finalDbCount5 = await AppointmentBooking.countDocuments({
+      $or: [{ userId: uStress5._id }, { bookedByUserId: uStress5._id }],
+      status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] },
+      arrivalStatus: { $ne: "NO_SHOW" }
+    });
+    assert(finalDbCount5 === 3, `5-sim race: Final active AppointmentBooking count in database is strictly 3 (Got: ${finalDbCount5})`);
+
+
+
+    // ──────────────────────────────────────────────────
     // TEST 20: Clean up test documents
     // ──────────────────────────────────────────────────
     console.log("\n--> TEST 20: Test data cleanup");

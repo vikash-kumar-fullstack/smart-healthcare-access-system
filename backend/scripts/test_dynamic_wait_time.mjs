@@ -408,6 +408,10 @@ async function runDynamicWaitTimeTests() {
     // TEST 12: Existing slotTime remains unchanged
     // ──────────────────────────────────────────────────
     console.log("\n--> TEST 12: Existing slotTime remains unchanged");
+    await AppointmentBooking.updateOne(
+      { _id: booking1._id },
+      { $set: { status: "CONFIRMED", arrivalStatus: "NOT_ARRIVED" } }
+    );
     const freshBooking = await AppointmentBooking.findById(booking1._id);
     assert(freshBooking.slotTime === "09:30", `slotTime on document is strictly preserved (Got: ${freshBooking.slotTime})`);
 

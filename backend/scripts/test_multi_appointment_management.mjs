@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, "../.env") });
+process.env.NODE_ENV = "test";
 
 import Doctor from "../src/modules/doctor/doctor.model.js";
 import Hospital from "../src/modules/hospital/hospital.model.js";

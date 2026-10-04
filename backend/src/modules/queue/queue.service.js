@@ -308,23 +308,22 @@ export const releaseBookingCapacity = async (ownerId, bookingId) => {
   }
 };
 
-export const acquireBookingCapacity = async (ownerId, prospectiveBookingId) => {
+export const acquireBookingCapacity = async (ownerId, prospectiveBookingId, session = null) => {
   const MAX_UPCOMING_APPOINTMENTS = 3;
   const activeUpcomingStatuses = ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"];
 
-  // 1. Authoritative check from AppointmentBooking
-  const activeDocs = await AppointmentBooking.find({
+  // 1. Authoritative check from AppointmentBooking within transaction
+  const findActiveQuery = AppointmentBooking.find({
     $or: [{ userId: ownerId }, { bookedByUserId: ownerId }],
     status: { $in: activeUpcomingStatuses },
     arrivalStatus: { $ne: "NO_SHOW" }
   }).distinct("_id");
+  if (session) {
+    findActiveQuery.session(session);
+  }
+  const activeDocIds = await findActiveQuery;
 
-  if (activeDocs.length >= MAX_UPCOMING_APPOINTMENTS) {
-    await AccountBookingCapacity.updateOne(
-      { ownerId },
-      { $set: { activeBookings: activeDocs } },
-      { upsert: true }
-    );
+  if (activeDocIds.length >= MAX_UPCOMING_APPOINTMENTS) {
     return {
       acquired: false,
       code: "MAX_UPCOMING_APPOINTMENTS_REACHED",
@@ -332,24 +331,19 @@ export const acquireBookingCapacity = async (ownerId, prospectiveBookingId) => {
     };
   }
 
-  // 2. Ensure capacity doc exists and is reconciled with activeDocs
+  // 2. Synchronize activeBookings with authoritative activeDocIds and ensure document exists within session
+  const updateOptions = { upsert: true };
+  if (session) updateOptions.session = session;
   await AccountBookingCapacity.updateOne(
     { ownerId },
-    { $setOnInsert: { ownerId, activeBookings: activeDocs } },
-    { upsert: true }
-  );
-
-  // Prune any IDs that are no longer active in AppointmentBooking
-  await AccountBookingCapacity.updateOne(
-    { ownerId },
-    {
-      $pull: {
-        activeBookings: { $nin: [...activeDocs, prospectiveBookingId] }
-      }
-    }
+    { $set: { activeBookings: activeDocIds } },
+    updateOptions
   );
 
   // 3. ATOMIC conditional push: only push prospectiveBookingId if current size < 3
+  const findOptions = { returnDocument: "after" };
+  if (session) findOptions.session = session;
+
   const capacityDoc = await AccountBookingCapacity.findOneAndUpdate(
     {
       ownerId,
@@ -358,7 +352,7 @@ export const acquireBookingCapacity = async (ownerId, prospectiveBookingId) => {
     {
       $addToSet: { activeBookings: prospectiveBookingId }
     },
-    { returnDocument: "after" }
+    findOptions
   );
 
   if (!capacityDoc) {
@@ -371,6 +365,7 @@ export const acquireBookingCapacity = async (ownerId, prospectiveBookingId) => {
 
   return { acquired: true };
 };
+
 
 export const executeBookQueue = async (userId, doctorId, bookingDate, slotTime = null, bookedByUserId = null, relationshipId = null, bookedForType = "SELF") => {
   const todayStr = getTodayIST();
@@ -712,18 +707,6 @@ export const executeBookQueue = async (userId, doctorId, bookingDate, slotTime =
     .substring(0, 3);
   const cleanDateStr = bookingDateStr.replace(/-/g, "").substring(2);
 
-  // Atomic acquisition of booking capacity under concurrency
-  const prospectiveBookingId = new mongoose.Types.ObjectId();
-  const capacityResult = await acquireBookingCapacity(ownerId, prospectiveBookingId);
-  if (!capacityResult.acquired) {
-    return {
-      canBook: false,
-      code: capacityResult.code,
-      reason: capacityResult.reason,
-      action: "manage_existing"
-    };
-  }
-
   const counterDoc = await BookingCounter.findOneAndUpdate(
     { hospitalId: doctor.hospitalId, date: bookingDateStr },
     { $inc: { count: 1 } },
@@ -733,31 +716,69 @@ export const executeBookQueue = async (userId, doctorId, bookingDate, slotTime =
   const runningNum = String(counterDoc.count).padStart(4, "0");
   const bookingNumber = `${hospCode}-${cleanDateStr}-${runningNum}`;
 
-  let booking;
+  // Ensure capacity tracking document exists for ownerId safely before transaction
+  await AccountBookingCapacity.updateOne(
+    { ownerId },
+    { $setOnInsert: { ownerId, activeBookings: [] } },
+    { upsert: true }
+  );
+
+  const prospectiveBookingId = new mongoose.Types.ObjectId();
+  const mongooseSession = await mongoose.startSession();
+  let booking = null;
+  let transactionError = null;
+
   try {
-    booking = await AppointmentBooking.create({
-      _id: prospectiveBookingId,
-      bookingNumber,
-      userId,
-      doctorId,
-      hospitalId: doctor.hospitalId,
-      sessionId: session._id,
-      date: bookingDateStr,
-      slotTime,
-      status: "CONFIRMED",
-      arrivalStatus: "NOT_ARRIVED",
-      bookedByUserId,
-      relationshipId,
-      bookedForType
+    await mongooseSession.withTransaction(async () => {
+      // Step 2 & 3: Authoritative check & atomic capacity acquisition within transaction
+      const capacityResult = await acquireBookingCapacity(ownerId, prospectiveBookingId, mongooseSession);
+      if (!capacityResult.acquired) {
+        const err = new Error(capacityResult.reason);
+        err.code = capacityResult.code;
+        throw err;
+      }
+
+      // Step 4: Create AppointmentBooking within the SAME transaction session
+      const createdBookings = await AppointmentBooking.create(
+        [{
+          _id: prospectiveBookingId,
+          bookingNumber,
+          userId,
+          doctorId,
+          hospitalId: doctor.hospitalId,
+          sessionId: session._id,
+          date: bookingDateStr,
+          slotTime,
+          status: "CONFIRMED",
+          arrivalStatus: "NOT_ARRIVED",
+          bookedByUserId,
+          relationshipId,
+          bookedForType
+        }],
+        { session: mongooseSession }
+      );
+      booking = createdBookings[0];
     });
   } catch (err) {
-    // Release capacity reservation immediately
-    await releaseBookingCapacity(ownerId, prospectiveBookingId);
+    transactionError = err;
+  } finally {
+    await mongooseSession.endSession();
+  }
+
+  if (transactionError) {
+    if (transactionError.code === "MAX_UPCOMING_APPOINTMENTS_REACHED") {
+      return {
+        canBook: false,
+        code: "MAX_UPCOMING_APPOINTMENTS_REACHED",
+        reason: "You can have up to 3 upcoming appointments. Please manage an existing appointment before booking another.",
+        action: "manage_existing"
+      };
+    }
 
     // Precise E11000 handling for active-slot conflict
-    if (err.code === 11000) {
-      const errKeyPattern = err.keyPattern || {};
-      const errMessage = err.message || "";
+    if (transactionError.code === 11000) {
+      const errKeyPattern = transactionError.keyPattern || {};
+      const errMessage = transactionError.message || "";
       const isSlotConflict =
         (errKeyPattern.doctorId && errKeyPattern.date && errKeyPattern.slotTime) ||
         errMessage.includes("uniq_active_doctor_date_slot") ||
@@ -810,9 +831,10 @@ export const executeBookQueue = async (userId, doctorId, bookingDate, slotTime =
       }
     }
 
-    // Do NOT convert unrelated E11000 errors into SLOT_UNAVAILABLE
-    throw err;
+    // Do NOT mask unrelated errors
+    throw transactionError;
   }
+
 
   // ── 9. Check Priority Credit consumption & cleanup expired credits ────────
   await BookingCredit.updateMany(
@@ -1530,6 +1552,12 @@ export const skipQueue = async (queueId, doctorId) => {
 
     await current.save({ session: mongooseSession });
 
+    const skippedBookings = await AppointmentBooking.find({
+      userId: current.userId,
+      sessionId: current.sessionId,
+      status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] }
+    }).select("_id userId bookedByUserId").session(mongooseSession);
+
     // Synchronize AppointmentBooking on skip
     await AppointmentBooking.updateMany(
       { userId: current.userId, sessionId: current.sessionId, status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] } },
@@ -1600,6 +1628,10 @@ export const skipQueue = async (queueId, doctorId) => {
     await mongooseSession.commitTransaction();
     mongooseSession.endSession();
 
+    for (const b of skippedBookings) {
+      releaseBookingCapacity(b.bookedByUserId || b.userId, b._id).catch(() => {});
+    }
+
     setImmediate(() => {
       triggerQueueRealtimeEvents(doctorId, { _id: current.sessionId }, current, next, "QUEUE_SKIPPED");
     });
@@ -1654,6 +1686,12 @@ export const markPatientNoShow = async (queueId, doctorId) => {
     }
 
     await current.save({ session: mongooseSession });
+
+    const noShowBookings = await AppointmentBooking.find({
+      userId: current.userId,
+      sessionId: current.sessionId,
+      status: { $in: ["BOOKED", "CONFIRMED", "REMINDER_SENT", "READY", "IN_CONSULTATION"] }
+    }).select("_id userId bookedByUserId").session(mongooseSession);
 
     // Synchronize AppointmentBooking to NO_SHOW / CANCELLED
     await AppointmentBooking.updateMany(
@@ -1746,6 +1784,10 @@ export const markPatientNoShow = async (queueId, doctorId) => {
 
     await mongooseSession.commitTransaction();
     mongooseSession.endSession();
+
+    for (const b of noShowBookings) {
+      releaseBookingCapacity(b.bookedByUserId || b.userId, b._id).catch(() => {});
+    }
 
     setImmediate(() => {
       triggerQueueRealtimeEvents(doctorId, { _id: current.sessionId }, current, next, "QUEUE_NO_SHOW");
